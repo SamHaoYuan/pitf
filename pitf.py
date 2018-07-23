@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import numpy as np
 import pandas as pd
 
@@ -7,22 +8,25 @@ Pairwise Interaction Tensor Factorization for Personalized Tag Recommendation
 
 
 class PITF:
-    def __init__(self, alpha=0.0001, lamb=0.1, k=30, max_iter=100, data_shape=None, verbose=0):
+    def __init__(self, alpha=0.0001, lamb=0.1, k=30, max_iter=100, init_st=0.1, data_shape=None, verbose=0):
         """
         数据以pandas的结构输入，为了后续的采样和顺序训练的方便，我们还是需要进行一定的处理
         :param alpha: 梯度下降速率
         :param lamb: 正则化参数
         :param k: 隐向量维度
         :param max_iter: 最大迭代次数
+        :param init_st: 隐向量初始化标准差
         :param data_shape: 训练数据维度（user，item, tag 数量）
-        :param verbose:
+        :param verbose: 目前来看，用于确定是否有验证集
         """
         self.alpha = alpha
         self.lamb = lamb
         self.k = k
         self.max_iter = max_iter
+        self.init_st = init_st
         self.data_shape = data_shape
         self.verbose = verbose
+        self.latent_vector_ = dict()
         self.trainTagSet, self.validaTagSet = dict(), dict()  # 一个用户对哪个item打过哪些tag
         self.trainUserTagSet, self.validaUserTagSet = dict(), dict()  # 一个用户使用过哪些tag
         self.trainItemTagSet, self.validaItemTagSet = dict(), dict()  # 一个Item被打过哪些tag
@@ -34,10 +38,10 @@ class PITF:
         :return: 隐向量初始化的结果
         """
         latent_vector = dict()
-        latent_vector['u'] = np.random.normal(loc=0, scale=0.1, size=(data_shape[0], self.k))
-        latent_vector['i'] = np.random.normal(loc=0, scale=0.1, size=(data_shape[1], self.k))
-        latent_vector['tu'] = np.random.normal(loc=0, scale=0.1, size=(data_shape[2], self.k))
-        latent_vector['ti'] = np.random.normal(loc=0, scale=0.1, size=(data_shape[2], self.k))
+        latent_vector['u'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[0], self.k))
+        latent_vector['i'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[1], self.k))
+        latent_vector['tu'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[2], self.k))
+        latent_vector['ti'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[2], self.k))
         return latent_vector
 
     def _init_data(self, data, validation=None):
@@ -102,7 +106,7 @@ class PITF:
         """
 
         r = np.random.randint(self.data_shape[2])  # sample random index
-        while r in self.trainTagSet[u][u]:
+        while r in self.trainTagSet[u][i]:
             r = np.random.randint(self.data_shape[2])  # repeat while the same index is sampled
         return r
 
@@ -122,11 +126,12 @@ class PITF:
             if predicted == answer_t: correct += 1
         return correct / data.shape[0]
 
-    def fit(self, data, validation=None):
+    def fit(self, data, validation=None, neg_number=1):
         """
         使用BPR思想拟合模型
         :param data: 训练数据，numpy结构（3*sample)
         :param validation:  验证或测试数据，numpy结构 （3*sample)
+        :param neg_number: 每个正例采样的负例次数，默认为1
         :return:
         """
         if self.data_shape is None:
@@ -136,30 +141,83 @@ class PITF:
         remained_iter = self.max_iter
         while True:
             remained_iter -= 1
+            print(str(self.max_iter - remained_iter))
             np.random.shuffle(data)  # 打乱数据集顺序（没有必要）
             for u, i, t in data:
-                nt = self._draw_negative_sample(u, i)
-                y_diff = self.y(u, i, t) - self.y(u, i, nt)
-                delta = 1-self._sigmoid(y_diff)
-                self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
-                self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
-                self.latent_vector_['tu'][t] += self.alpha * (delta * self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][t])
-                self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
-                self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
-                self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+                neg_sample = neg_number
+                while neg_sample >= 0:
+                    nt = self._draw_negative_sample(u, i)
+                    neg_sample -= 1
+                    y_diff = self.y(u, i, t) - self.y(u, i, nt)
+                    delta = 1-self._sigmoid(y_diff)
+                    self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
+                    self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
+                    self.latent_vector_['tu'][t] += self.alpha * (delta * self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][t])
+                    self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
+                    self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
+                    self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
             if self.verbose == 1:
-                print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))
+                self.evaluate()
+                # print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))
             if remained_iter <= 0:
                 break
         return self
 
-    def y(self, i, j, k):
-        return self.latent_vector_['tu'][k].dot(self.latent_vector_['u'][i]) + self.latent_vector_['ti'][k].dot(self.latent_vector_['i'][j])
+    def y(self, u, i, t):
+        """
+        隐因子向量点击
+        :param u: 用户id
+        :param i: item id
+        :param t: 标签 id
+        :return:
+        """
+        return self.latent_vector_['tu'][t].dot(self.latent_vector_['u'][u]) + self.latent_vector_['ti'][t].dot(self.latent_vector_['i'][i])
 
-    def predict(self, i, j):
-        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][i]) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][j])
+    def predict(self, u, i):
+        """
+        给定用户和tag，推荐得分最高的tag
+        :param u:
+        :param i:
+        :return: 返回 tag id
+        """
+        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u]) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
         return y.argmax()
 
     def predict2(self, x):
+        """
+        批量输入测试数据（每一行为user-item)
+        :param x: 矩阵或者张量，每一行为一个user-item测试用例
+        :return
+        """
         y = self.latent_vector_['u'][x[:, 0]].dot(self.latent_vector_['tu'].T) + self.latent_vector_['i'][x[:, 1]].dot(self.latent_vector_['ti'].T)
         return y.argmax(axis=1)
+
+    def predict_top_k(self, u, i, k=5):
+        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u]) + self.latent_vector_['ti'].dot(
+            self.latent_vector_['i'][i])
+        return y.argsort()[-k:]  # 按降序进行排列
+
+    def evaluate(self, k=5):
+        precision = 0
+        recall = 0
+        count = 0
+        for u in self.validaTagSet.keys():
+            for i in self.validaTagSet[u].keys():
+                number = 0
+                tags = self.validaTagSet[u][i]
+                tagsNum = len(tags)
+                y_pre = self.predict_top_k(u, i, k)
+                for tag in y_pre:
+                    if tag in tags:
+                        number += 1
+                    precision = precision + float(number/k)
+                    recall = recall + float(number/tagsNum)
+                count += 1
+        precision = precision/count
+        recall = recall/count
+        f_score = 2 * (precision * recall) / (precision + recall)
+        print("Precisions: " + str(precision))
+        print("Recall: " + str(recall))
+        print("F1: " + str(f_score))
+        print("==================================")
+
