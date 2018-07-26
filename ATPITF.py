@@ -33,10 +33,12 @@ class PITF:
         self.init_st = init_st
         self.data_shape = data_shape
         self.verbose = verbose
+        self.gamma = gamma
         self.latent_vector_ = dict()
         self.trainTagSet, self.validaTagSet = dict(), dict()  # 一个用户对哪个item打过哪些tag
         self.trainUserTagSet, self.validaUserTagSet = dict(), dict()  # 一个用户使用过哪些tag
         self.trainItemTagSet, self.validaItemTagSet = dict(), dict()  # 一个Item被打过哪些tag
+        self.userTimeList, self.validaUserTimeList = dict(), dict()  # 按顺序存储每个用户的 timestamp
 
     def _init_latent_vectors(self, data_shape):
         """
@@ -69,14 +71,24 @@ class PITF:
                 self.trainUserTagSet[u] = set()
             if i not in self.trainItemTagSet.keys():
                 self.trainItemTagSet[i] = set()
+            if u not in self.userTimeList.keys():
+                self.userTimeList[u] = list()
+            self.userTimeList[u].append((i, t, time))
             self.trainUserTagSet[u].add(t)
             self.trainItemTagSet[i].add(t)
+        for u in self.userTimeList.keys():
+            # 每一个user，处理为tag,time列表，可以根据实际情况计算权重
+            self.userTimeList[u] = np.array(self.userTimeList[u])
         if validation is not None:
-            for u, i, t in validation:
+            for u, i, t, time in validation:
                 if u not in self.validaTagSet.keys():
                     self.validaTagSet[u] = dict()
                 if i not in self.validaTagSet[u].keys():
                     self.validaTagSet[u][i] = set()
+                if u not in self.validaUserTimeList.keys():
+                    self.validaUserTimeList[u] = dict()
+                    # 暂时不考虑多个时间戳的情况，直接进行覆盖
+                    self.validaUserTimeList[u][i] = time
                 self.validaTagSet[u][i].add(t)
                 if u not in self.validaUserTagSet.keys():
                     self.validaUserTagSet[u] = set()
@@ -122,8 +134,9 @@ class PITF:
     def _sigmoid(self, x):
         return 1.0 / (1.0 + np.exp(-x))
 
-    def _cal_time_weight(self, i):
-        return
+    def _cal_time_weight(self, pre,  now):
+
+        return 1 + np.log10(1+np.power(10, 3)*np.exp(-0.5*(now - pre)))
 
     def _score(self, data):
         """
@@ -141,7 +154,7 @@ class PITF:
     def fit(self, data, validation=None, neg_number=1):
         """
         使用BPR思想拟合模型
-        :param data: 训练数据，pandas结构，时间序列数据（sample_number * 4)
+        :param data: 训练数据，numpy结构，时间序列数据（sample_number * 4)
         :param validation:  验证或测试数据，numpy结构 （sample_number * 4)
         :param neg_number: 每个正例采样的负例次数，默认为1
         :return:
@@ -154,45 +167,83 @@ class PITF:
         while True:
             remained_iter -= 1
             print(str(self.max_iter - remained_iter))
-            np.random.shuffle(data)  # 打乱数据集顺序（没有必要）
-            for u, i, t in data:
-                neg_sample = neg_number
-                while neg_sample >= 0:
-                    nt = self._draw_negative_sample(u, i)
-                    neg_sample -= 1
-                    y_diff = self.y(u, i, t) - self.y(u, i, nt)
-                    delta = 1-self._sigmoid(y_diff)
-                    self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
-                    self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
-                    self.latent_vector_['tu'][t] += self.alpha * (delta * self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][t])
-                    self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
-                    self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
-                    self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+            # np.random.shuffle(data)  # 打乱数据集顺序（没有必要）
+            for u in self.userTimeList.keys():
+                history = []  # 用来记录当前用户行为数
+                history_tag = set()  # 记录用户已经使用过的tag
+                # 根据时间先后进行遍历
+                for index in self.userTimeList[u][:, 2].argsort():
+                    i, t, time = self.userTimeList[u][index]
+                    neg_sample = neg_number
+                    c = self._cal_context(history, time)
+                    while neg_sample >= 0:
+                        nt = self._draw_negative_sample(u, i)
+                        neg_sample -= 1
+                        y_diff = self.y(u, i, t, c) - self.y(u, i, nt, c)
+                        delta = 1-self._sigmoid(y_diff)
+                        self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
+                        self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
+                        if t not in history_tag: # 如果tag不在历史记录中，则梯度只是多了一个上下文， 否则将要考虑历史记录存在的梯度
+                            self.latent_vector_['tu'][t] += self.alpha * (delta * (self.latent_vector_['u'][u]+self.gamma*c)- self.lamb * self.latent_vector_['tu'][t])
+                        else:
+                            gra_t = self._cal_gra_t(history, time)
+                            self.latent_vector_['tu'][t] += self.alpha * (
+                                        delta * (self.latent_vector_['u'][u] + self.gamma*(c+gra_t)) - self.lamb *
+                                        self.latent_vector_['tu'][t])
+                        # 负采样暂时不考虑时间因素
+                        self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
+                        self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
+                        self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+                    history.append(self.userTimeList[u][index])
+                    history_tag.add(t)
             if self.verbose == 1:
                 self.evaluate()
                 # print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))
             if remained_iter <= 0:
                 break
-        return self
+        return
 
-    def y(self, u, i, t):
+    def _cal_context(self, history, time):
+        c = np.zeros(self.k)
+        if history:
+            for pre_i, pre_t, pre_time in history:
+                weight = self._cal_time_weight(pre_time, time)
+                c = c + weight * self.latent_vector_['tu'][pre_t]
+        return c
+
+    def _cal_gra_t(self, history, time, t):
+        extra_c = np.zeros(self.k)
+        for i, pre_t, pre_time in history:
+            if pre_t == t:
+                weight = self._cal_time_weight(pre_time, time)
+                extra_c = extra_c + weight*self.latent_vector_['tu'][pre_t]
+        return extra_c
+
+    def y(self, u, i, t, c):
         """
         隐因子向量点击
         :param u: 用户id
         :param i: item id
         :param t: 标签 id
+        :param time: 当前时间点
         :return:
         """
-        return self.latent_vector_['tu'][t].dot(self.latent_vector_['u'][u]) + self.latent_vector_['ti'][t].dot(self.latent_vector_['i'][i])
+        return self.latent_vector_['tu'][t].dot(self.latent_vector_['u'][u] + self.gamma * c) + self.latent_vector_['ti'][t].dot(self.latent_vector_['i'][i])
 
-    def predict(self, u, i):
+    def predict(self, u, i, time):
         """
         给定用户和tag，推荐得分最高的tag
         :param u:
         :param i:
         :return: 返回 tag id
         """
-        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u]) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
+        # 找出该时间点前，这个用户打过的tag
+        c = np.zeros(self.k)
+        for tag, t in self.userTimeList[u]:
+            weight = self._cal_time_weight(t, time)
+            c = c + weight * self.latent_vector_['tu'][tag]
+        # 使用权重组合上下文向量
+        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u]+self.gamma*c) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
         return y.argmax()
 
     def predict2(self, x):
@@ -204,8 +255,12 @@ class PITF:
         y = self.latent_vector_['u'][x[:, 0]].dot(self.latent_vector_['tu'].T) + self.latent_vector_['i'][x[:, 1]].dot(self.latent_vector_['ti'].T)
         return y.argmax(axis=1)
 
-    def predict_top_k(self, u, i, k=5):
-        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u]) + self.latent_vector_['ti'].dot(
+    def predict_top_k(self, u, i, time, k=5):
+        c = np.zeros(self.k)
+        for tag, t in self.userTimeList[u]:
+            weight = self._cal_time_weight(self.latent_vector_['tu'][tag], time)
+            c = c + weight * self.latent_vector_['tu'][tag]
+        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u] + self.gamma*c) + self.latent_vector_['ti'].dot(
             self.latent_vector_['i'][i])
         return y.argsort()[-k:]  # 按降序进行排列
 
@@ -217,8 +272,10 @@ class PITF:
             for i in self.validaTagSet[u].keys():
                 number = 0
                 tags = self.validaTagSet[u][i]
+                # 如果对一个user-item对，有多个时间戳，统一按一个处理
+                time = self.validaUserTimeList[u][i]
                 tagsNum = len(tags)
-                y_pre = self.predict_top_k(u, i, k)
+                y_pre = self.predict_top_k(u, i, time, k)
                 for tag in y_pre:
                     if tag in tags:
                         number += 1

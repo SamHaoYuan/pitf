@@ -10,7 +10,7 @@ movielens_all = np.genfromtxt('data/movielens/all_id_core3_train', delimiter='\t
 movielens = movielens_all[:, 0:-1].astype(int)
 
 movielens_test_all = np.genfromtxt('data/movielens/all_id_core3_test', delimiter='\t', dtype=float)
-movielens_test = movielens_all[:, 0:-1].astype(int)
+movielens_test = movielens_test_all[:, 0:-1].astype(int)
 
 learnRate = 0.0001
 lam = 0.00005
@@ -21,7 +21,7 @@ init_st = 0.01
 
 model = PITF(learnRate, lam, dim, iter_, init_st, verbose=1)
 
-model.fit(movielens, movielens_test, 10)
+model.fit(movielens, movielens_test, 150)
 
 y_true = movielens_test[:, 2]
 y_pre = model.predict2(movielens_test)
