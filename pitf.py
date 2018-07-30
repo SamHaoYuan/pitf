@@ -150,12 +150,18 @@ class PITF:
                     neg_sample -= 1
                     y_diff = self.y(u, i, t) - self.y(u, i, nt)
                     delta = 1-self._sigmoid(y_diff)
-                    self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
-                    self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
-                    self.latent_vector_['tu'][t] += self.alpha * (delta * self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][t])
-                    self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
-                    self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
-                    self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+                    user_vec = self.latent_vector_['u'][u]
+                    item_vec = self.latent_vector_['i'][i]
+                    user_t_vec = self.latent_vector_['tu'][t]
+                    user_nt_vec = self.latent_vector_['tu'][nt]
+                    item_t_vec = self.latent_vector_['ti'][t]
+                    item_nt_vec = self.latent_vector_['ti'][nt]
+                    self.latent_vector_['u'][u] += self.alpha * (delta * (user_t_vec - user_nt_vec) - self.lamb * user_vec)
+                    self.latent_vector_['i'][i] += self.alpha * (delta * (item_t_vec - item_nt_vec) - self.lamb * item_vec)
+                    self.latent_vector_['tu'][t] += self.alpha * (delta * user_vec - self.lamb * user_t_vec)
+                    self.latent_vector_['tu'][nt] += self.alpha * (delta * -user_vec - self.lamb * user_nt_vec)
+                    self.latent_vector_['ti'][t] += self.alpha * (delta * item_vec - self.lamb * item_t_vec)
+                    self.latent_vector_['ti'][nt] += self.alpha * (delta * -item_vec - self.lamb * item_nt_vec)
             if self.verbose == 1:
                 self.evaluate()
                 # print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))
