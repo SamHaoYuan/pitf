@@ -6,8 +6,8 @@ Attention-based Pairwise Interaction Tensor Factorization for Sequential Persona
 """
 
 
-class PITF:
-    def __init__(self, alpha=0.0001, lamb=0.1, k=30, max_iter=100, init_st=0.1, gamma=1, data_shape=None, verbose=0):
+class ATPITF:
+    def __init__(self, alpha=0.0001, lamb=0.1, k=30, max_iter=100, init_st=0.1, gamma=0.5, data_shape=None, verbose=0):
         """
         数据以numpy的结构输入，为了后续的采样和顺序训练的方便，我们还是需要进行一定的处理
         对于同一个用户，数据必须的用于训练，同时有两种注意力机制的方法：
@@ -39,6 +39,7 @@ class PITF:
         self.trainUserTagSet, self.validaUserTagSet = dict(), dict()  # 一个用户使用过哪些tag
         self.trainItemTagSet, self.validaItemTagSet = dict(), dict()  # 一个Item被打过哪些tag
         self.userTimeList, self.validaUserTimeList = dict(), dict()  # 按顺序存储每个用户的 timestamp
+        self.userShortMemory = dict()  # 记录用户短期记忆
 
     def _init_latent_vectors(self, data_shape):
         """
@@ -73,12 +74,19 @@ class PITF:
                 self.trainItemTagSet[i] = set()
             if u not in self.userTimeList.keys():
                 self.userTimeList[u] = list()
+                self.userShortMemory[u] = list()
             self.userTimeList[u].append((i, t, time))
             self.trainUserTagSet[u].add(t)
             self.trainItemTagSet[i].add(t)
         for u in self.userTimeList.keys():
             # 每一个user，处理为tag,time列表，可以根据实际情况计算权重
             self.userTimeList[u] = np.array(self.userTimeList[u])
+            if len(self.userTimeList[u]) > 10:
+                short_memory_list = self.userTimeList[u][:, 2].argsort()[-10:]
+                for index in short_memory_list:
+                    self.userShortMemory[u].append(self.userTimeList[u][index])
+            else:
+                self.userShortMemory[u] = self.userTimeList[u]
         if validation is not None:
             for u, i, t, time in validation:
                 if u not in self.validaTagSet.keys():
@@ -107,12 +115,12 @@ class PITF:
         u_max = -1
         i_max = -1
         t_max = -1
-        for u, i, t in data:
+        for u, i, t, time in data:
             if u > u_max: u_max = u
             if i > i_max: i_max = i
             if t > t_max: t_max = t
         if not validation is None:
-            for u, i, t in validation:
+            for u, i, t , time in validation:
                 if u > u_max: u_max = u
                 if i > i_max: i_max = i
                 if t > t_max: t_max = t
@@ -177,6 +185,7 @@ class PITF:
                     neg_sample = neg_number
                     c = self._cal_context(history, time)
                     while neg_sample >= 0:
+                        # 负采样暂时不考虑时间因素
                         nt = self._draw_negative_sample(u, i)
                         neg_sample -= 1
                         y_diff = self.y(u, i, t, c) - self.y(u, i, nt, c)
@@ -184,16 +193,18 @@ class PITF:
                         self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
                         self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
                         if t not in history_tag: # 如果tag不在历史记录中，则梯度只是多了一个上下文， 否则将要考虑历史记录存在的梯度
-                            self.latent_vector_['tu'][t] += self.alpha * (delta * (self.latent_vector_['u'][u]+self.gamma*c)- self.lamb * self.latent_vector_['tu'][t])
+                            self.latent_vector_['tu'][t] += self.alpha * (delta * ((1-self.gamma)*self.latent_vector_['u'][u]+self.gamma*c)- self.lamb * self.latent_vector_['tu'][t])
                         else:
-                            gra_t = self._cal_gra_t(history, time)
+                            gra_t = self._cal_gra_t(history, time, t)
                             self.latent_vector_['tu'][t] += self.alpha * (
-                                        delta * (self.latent_vector_['u'][u] + self.gamma*(c+gra_t)) - self.lamb *
+                                        delta * ((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma*(c+gra_t)) - self.lamb *
                                         self.latent_vector_['tu'][t])
                         # 负采样暂时不考虑时间因素
                         self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
                         self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
                         self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+                    if len(history) > 10:
+                        history.pop(0)
                     history.append(self.userTimeList[u][index])
                     history_tag.add(t)
             if self.verbose == 1:
@@ -205,10 +216,15 @@ class PITF:
 
     def _cal_context(self, history, time):
         c = np.zeros(self.k)
-        if history:
+        weights = []
+        if list(history):
+            sum_w = 0
             for pre_i, pre_t, pre_time in history:
                 weight = self._cal_time_weight(pre_time, time)
-                c = c + weight * self.latent_vector_['tu'][pre_t]
+                sum_w += weight
+                weights.append((pre_t, weight))
+            for pre_t, weight in weights:
+                c = c + weight * self.latent_vector_['tu'][pre_t]/sum_w
         return c
 
     def _cal_gra_t(self, history, time, t):
@@ -228,7 +244,7 @@ class PITF:
         :param time: 当前时间点
         :return:
         """
-        return self.latent_vector_['tu'][t].dot(self.latent_vector_['u'][u] + self.gamma * c) + self.latent_vector_['ti'][t].dot(self.latent_vector_['i'][i])
+        return self.latent_vector_['tu'][t].dot((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma * c) + self.latent_vector_['ti'][t].dot(self.latent_vector_['i'][i])
 
     def predict(self, u, i, time):
         """
@@ -238,12 +254,9 @@ class PITF:
         :return: 返回 tag id
         """
         # 找出该时间点前，这个用户打过的tag
-        c = np.zeros(self.k)
-        for tag, t in self.userTimeList[u]:
-            weight = self._cal_time_weight(t, time)
-            c = c + weight * self.latent_vector_['tu'][tag]
+        c = self._cal_context(self.userShortMemory[u], time)
         # 使用权重组合上下文向量
-        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u]+self.gamma*c) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
+        y = self.latent_vector_['tu'].dot((1-self.gamma)*self.latent_vector_['u'][u]+self.gamma*c) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
         return y.argmax()
 
     def predict2(self, x):
@@ -256,11 +269,8 @@ class PITF:
         return y.argmax(axis=1)
 
     def predict_top_k(self, u, i, time, k=5):
-        c = np.zeros(self.k)
-        for tag, t in self.userTimeList[u]:
-            weight = self._cal_time_weight(self.latent_vector_['tu'][tag], time)
-            c = c + weight * self.latent_vector_['tu'][tag]
-        y = self.latent_vector_['tu'].dot(self.latent_vector_['u'][u] + self.gamma*c) + self.latent_vector_['ti'].dot(
+        c = self._cal_context(self.userShortMemory[u], time)
+        y = self.latent_vector_['tu'].dot((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma*c) + self.latent_vector_['ti'].dot(
             self.latent_vector_['i'][i])
         return y.argsort()[-k:]  # 按降序进行排列
 
