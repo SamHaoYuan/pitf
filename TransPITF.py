@@ -45,8 +45,8 @@ class PITF:
         latent_vector['u'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[0], self.k))
         latent_vector['i'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[1], self.k))
         latent_vector['t'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[2], self.k))
-        trans_matrix['u'] = np.random.normal(loc=0, scale=self.init_st, size=(self.k, self.k))
-        trans_matrix['i'] = np.random.normal(loc=0, scale=self.init_st, size=(self.k, self.k))
+        trans_matrix['u'] = np.random.uniform(0, self.init_st, size=(self.k, self.k))
+        trans_matrix['i'] = np.random.normal(0, self.init_st, size=(self.k, self.k))
         return latent_vector, trans_matrix
 
     def _init_data(self, data, validation=None):
@@ -155,12 +155,26 @@ class PITF:
                     neg_sample -= 1
                     y_diff = self.y(u, i, t) - self.y(u, i, nt)
                     delta = 1-self._sigmoid(y_diff)
-                    self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
-                    self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
-                    self.latent_vector_['tu'][t] += self.alpha * (delta * self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][t])
-                    self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
-                    self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
-                    self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+                    user_vec = self.latent_vector_['u'][u]
+                    item_vec = self.latent_vector_['i'][i]
+                    tag_vec = self.latent_vector_['t'][t]
+                    nt_vec = self.latent_vector_['t'][nt]
+                    user_trans = self.trans_matrix['u']
+                    item_trans = self.trans_matrix['i']
+                    self.latent_vector_['u'][u] += self.alpha * (
+                            delta * (np.dot(tag_vec, user_trans) - np.dot(nt_vec, user_trans)) - self.lamb * user_vec)
+                    self.latent_vector_['i'][i] += self.alpha * (
+                            delta * (np.dot(tag_vec, item_trans) - np.dot(nt_vec, item_trans)) - self.lamb * item_vec)
+                    self.latent_vector_['t'][t] += self.alpha * (delta * (
+                                np.dot(user_vec, user_trans.transpose()) + np.dot(item_vec, item_trans.transpose()) -
+                                self.lamb * tag_vec))
+                    self.latent_vector_['t'][nt] += self.alpha * (delta * (-(
+                            np.dot(user_vec, user_trans.transpose()) + np.dot(item_vec, item_trans.transpose())) -
+                                                                           self.lamb * nt_vec))
+                    self.trans_matrix['u'] += self.alpha*(delta*(np.dot(tag_vec.transpose(), user_vec) - np.dot(
+                        nt_vec.transpose(), user_vec)) - self.lamb * user_trans)
+                    self.trans_matrix['i'] += self.alpha*(delta(np.dot(tag_vec.transpose(), item_vec) - np.dot(
+                        nt_vec.transpose, item_vec)) - self.lamb * item_trans)
             if self.verbose == 1:
                 self.evaluate()
                 # print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))

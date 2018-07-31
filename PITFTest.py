@@ -21,7 +21,7 @@ init_st = 0.01
 
 model = PITF(learnRate, lam, dim, iter_, init_st, verbose=1)
 
-model.fit(movielens, movielens_test, 150)
+model.fit(movielens, movielens_test, 100)
 
 y_true = movielens_test[:, 2]
 y_pre = model.predict2(movielens_test)

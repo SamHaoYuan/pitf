@@ -13,6 +13,7 @@ class ATPITF:
         对于同一个用户，数据必须的用于训练，同时有两种注意力机制的方法：
         ·如果采用时间注意力，基于时间衰减分配item权重，可以直接将这个向量当做user embedding，也可以与user embedding进行
         简单的Merge操作
+            1.我们按照0.5的比例，直接将两个embedding进行拼接（相加）
         ·基于正常计算的attention,可以直接和user embedding进行权重计算，然后进行拼接
         直接用
         任意一种方法，都需要重新推导梯度下降公式
@@ -185,24 +186,30 @@ class ATPITF:
                     neg_sample = neg_number
                     c = self._cal_context(history, time)
                     while neg_sample >= 0:
-                        # 负采样暂时不考虑时间因素
+                        # 负采样暂时不考虑顺序因素
                         nt = self._draw_negative_sample(u, i)
                         neg_sample -= 1
                         y_diff = self.y(u, i, t, c) - self.y(u, i, nt, c)
                         delta = 1-self._sigmoid(y_diff)
-                        self.latent_vector_['u'][u] += self.alpha * (delta * (self.latent_vector_['tu'][t] - self.latent_vector_['tu'][nt]) - self.lamb * self.latent_vector_['u'][u])
-                        self.latent_vector_['i'][i] += self.alpha * (delta * (self.latent_vector_['ti'][t] - self.latent_vector_['ti'][nt]) - self.lamb * self.latent_vector_['i'][i])
+                        user_vec = self.latent_vector_['u'][u]
+                        item_vec = self.latent_vector_['i'][i]
+                        user_t_vec = self.latent_vector_['tu'][t]
+                        user_nt_vec = self.latent_vector_['tu'][nt]
+                        item_t_vec = self.latent_vector_['ti'][t]
+                        item_nt_vec = self.latent_vector_['ti'][nt]
+                        self.latent_vector_['u'][u] += self.alpha * (delta * (user_t_vec - user_nt_vec) - self.lamb * user_vec)
+                        self.latent_vector_['i'][i] += self.alpha * (delta * (item_t_vec - item_nt_vec) - self.lamb * item_vec)
                         if t not in history_tag: # 如果tag不在历史记录中，则梯度只是多了一个上下文， 否则将要考虑历史记录存在的梯度
-                            self.latent_vector_['tu'][t] += self.alpha * (delta * ((1-self.gamma)*self.latent_vector_['u'][u]+self.gamma*c)- self.lamb * self.latent_vector_['tu'][t])
+                            self.latent_vector_['tu'][t] += self.alpha * (delta * ((1-self.gamma)*user_vec+self.gamma*c)- self.lamb * user_t_vec)
                         else:
                             gra_t = self._cal_gra_t(history, time, t)
                             self.latent_vector_['tu'][t] += self.alpha * (
-                                        delta * ((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma*(c+gra_t)) - self.lamb *
-                                        self.latent_vector_['tu'][t])
+                                    delta * ((1-self.gamma)*user_vec + self.gamma*(c+gra_t)) - self.lamb * user_t_vec)
                         # 负采样暂时不考虑时间因素
-                        self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
-                        self.latent_vector_['ti'][t] += self.alpha * (delta * self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][t])
-                        self.latent_vector_['ti'][nt] += self.alpha * (delta * -self.latent_vector_['i'][i] - self.lamb * self.latent_vector_['ti'][nt])
+                        self.latent_vector_['tu'][nt] += self.alpha * (delta * -((1-self.gamma)*user_vec+self.gamma*c)- self.lamb * user_nt_vec)
+                        # self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
+                        self.latent_vector_['ti'][t] += self.alpha * (delta * item_vec - self.lamb * item_t_vec)
+                        self.latent_vector_['ti'][nt] += self.alpha * (delta * -item_vec - self.lamb * item_nt_vec)
                     if len(history) > 10:
                         history.pop(0)
                     history.append(self.userTimeList[u][index])
