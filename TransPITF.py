@@ -9,7 +9,7 @@ Pairwise Interaction Tensor Factorization for Personalized Tag Recommendation By
 """
 
 
-class PITF:
+class TransPITF:
     def __init__(self, alpha=0.0001, lamb=0.1, k=30, max_iter=100, init_st=0.1, data_shape=None, verbose=0):
         """
         数据以pandas的结构输入，为了后续的采样和顺序训练的方便，我们还是需要进行一定的处理
@@ -45,8 +45,8 @@ class PITF:
         latent_vector['u'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[0], self.k))
         latent_vector['i'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[1], self.k))
         latent_vector['t'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[2], self.k))
-        trans_matrix['u'] = np.random.uniform(0, self.init_st, size=(self.k, self.k))
-        trans_matrix['i'] = np.random.normal(0, self.init_st, size=(self.k, self.k))
+        trans_matrix['u'] = np.random.normal(loc=0, scale=self.init_st, size=(self.k, self.k))
+        trans_matrix['i'] = np.random.normal(loc=0, scale=self.init_st, size=(self.k, self.k))
         return latent_vector, trans_matrix
 
     def _init_data(self, data, validation=None):
@@ -173,8 +173,8 @@ class PITF:
                                                                            self.lamb * nt_vec))
                     self.trans_matrix['u'] += self.alpha*(delta*(np.dot(tag_vec.transpose(), user_vec) - np.dot(
                         nt_vec.transpose(), user_vec)) - self.lamb * user_trans)
-                    self.trans_matrix['i'] += self.alpha*(delta(np.dot(tag_vec.transpose(), item_vec) - np.dot(
-                        nt_vec.transpose, item_vec)) - self.lamb * item_trans)
+                    self.trans_matrix['i'] += self.alpha*(delta*(np.dot(tag_vec.transpose(), item_vec) - np.dot(
+                            nt_vec.transpose(), item_vec)) - self.lamb * item_trans)
             if self.verbose == 1:
                 self.evaluate()
                 # print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))
@@ -190,7 +190,7 @@ class PITF:
         :param t: 标签 id
         :return:
         """
-        return self.latent_vector_['u'][u].dot(self.latent_vector_['t'][t]*self.trans_matrix['u']) + self.latent_vector_['i'][i].dot(self.latent_vector_['t'][t]*self.trans_matrix['i'])
+        return self.latent_vector_['u'][u].dot(np.dot(self.latent_vector_['t'][t], self.trans_matrix['u'])) + self.latent_vector_['i'][i].dot(np.dot(self.latent_vector_['t'][t], self.trans_matrix['i']))
 
     def predict(self, u, i):
         """
@@ -212,7 +212,7 @@ class PITF:
         return y.argmax(axis=1)
 
     def predict_top_k(self, u, i, k=5):
-        y = (self.latent_vector_['t'] * self.trans_matrix['u']).dot(self.latent_vector_['u'][u]) + (self.latent_vector_['t']* self.trans_matrix['i']).dot(
+        y = np.dot(self.latent_vector_['t'], self.trans_matrix['u']).dot(self.latent_vector_['u'][u]) + np.dot(self.latent_vector_['t'], self.trans_matrix['i']).dot(
             self.latent_vector_['i'][i])
         return y.argsort()[-k:]  # 按降序进行排列
 
@@ -229,12 +229,15 @@ class PITF:
                 for tag in y_pre:
                     if tag in tags:
                         number += 1
-                    precision = precision + float(number/k)
-                    recall = recall + float(number/tagsNum)
+                precision = precision + float(number/k)
+                recall = recall + float(number/tagsNum)
                 count += 1
-        precision = precision/count
-        recall = recall/count
-        f_score = 2 * (precision * recall) / (precision + recall)
+        if precision ==0 and recall == 0:
+            f_score = 0
+        else:
+            precision = precision/count
+            recall = recall/count
+            f_score = 2 * (precision * recall) / (precision + recall)
         print("Precisions: " + str(precision))
         print("Recall: " + str(recall))
         print("F1: " + str(f_score))

@@ -216,8 +216,8 @@ class PITF:
                 for tag in y_pre:
                     if tag in tags:
                         number += 1
-                    precision = precision + float(number/k)
-                    recall = recall + float(number/tagsNum)
+                precision = precision + float(number/k)
+                recall = recall + float(number/tagsNum)
                 count += 1
         precision = precision/count
         recall = recall/count

@@ -25,7 +25,7 @@ lam = 0.00005
 dim = 64
 iter_ = 100
 init_st = 0.01
-gamma = 0.3
+gamma = 0.2
 
 
 model = ATPITF(learnRate, lam, dim, iter_,  init_st, gamma, verbose=1)
