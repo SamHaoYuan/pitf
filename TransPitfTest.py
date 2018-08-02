@@ -14,13 +14,14 @@ movielens_test = movielens_test_all[:, 0:-1].astype(int)
 
 learnRate = 0.001
 lam = 0.00005
-dim = 64
+lam_trans = 0.01
+dim = 32
+tag_dim = 64
 iter_ = 100
 init_st = 0.01
 
 
-model = TransPITF(learnRate, lam, dim, iter_, init_st, verbose=1)
-
+model = TransPITF(learnRate, lam, lam_trans, dim, tag_dim, iter_, init_st, verbose=1)
 model.fit(movielens, movielens_test, 10)
 
 

@@ -12,10 +12,10 @@ movielens = movielens_all[:, 0:-1].astype(int)
 movielens_test_all = np.genfromtxt('data/movielens/all_id_core3_test', delimiter='\t', dtype=float)
 movielens_test = movielens_test_all[:, 0:-1].astype(int)
 
-learnRate = 0.0001
+learnRate = 0.01
 lam = 0.00005
 dim = 64
-iter_ = 100
+iter_ = 200
 init_st = 0.01
 
 

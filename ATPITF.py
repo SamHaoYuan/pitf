@@ -82,7 +82,7 @@ class ATPITF:
         for u in self.userTimeList.keys():
             # 每一个user，处理为tag,time列表，可以根据实际情况计算权重
             self.userTimeList[u] = np.array(self.userTimeList[u])
-            if len(self.userTimeList[u]) > 5:
+            if len(self.userTimeList[u]) > 10:
                 short_memory_list = self.userTimeList[u][:, 2].argsort()[-10:]
                 for index in short_memory_list:
                     self.userShortMemory[u].append(self.userTimeList[u][index])
@@ -210,7 +210,7 @@ class ATPITF:
                         # self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
                         self.latent_vector_['ti'][t] += self.alpha * (delta * item_vec - self.lamb * item_t_vec)
                         self.latent_vector_['ti'][nt] += self.alpha * (delta * -item_vec - self.lamb * item_nt_vec)
-                    if len(history) > 5:
+                    if len(history) > 10:
                         history.pop(0)
                     history.append(self.userTimeList[u][index])
                     history_tag.add(t)

@@ -10,7 +10,7 @@ Pairwise Interaction Tensor Factorization for Personalized Tag Recommendation By
 
 
 class TransPITF:
-    def __init__(self, alpha=0.0001, lamb=0.1, k=30, max_iter=100, init_st=0.1, data_shape=None, verbose=0):
+    def __init__(self, alpha=0.0001, lamb=0.1,lamb_trans = 0.1, k=30, tag_dim=30, max_iter=100, init_st=0.1, data_shape=None, verbose=0):
         """
         数据以pandas的结构输入，为了后续的采样和顺序训练的方便，我们还是需要进行一定的处理
         :param alpha: 梯度下降速率
@@ -23,7 +23,9 @@ class TransPITF:
         """
         self.alpha = alpha
         self.lamb = lamb
+        self.lamb_trans = lamb_trans
         self.k = k
+        self.tag_dim = tag_dim
         self.max_iter = max_iter
         self.init_st = init_st
         self.data_shape = data_shape
@@ -44,9 +46,9 @@ class TransPITF:
         trans_matrix = dict()
         latent_vector['u'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[0], self.k))
         latent_vector['i'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[1], self.k))
-        latent_vector['t'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[2], self.k))
-        trans_matrix['u'] = np.random.normal(loc=0, scale=self.init_st, size=(self.k, self.k))
-        trans_matrix['i'] = np.random.normal(loc=0, scale=self.init_st, size=(self.k, self.k))
+        latent_vector['t'] = np.random.normal(loc=0, scale=self.init_st, size=(data_shape[2], self.tag_dim))
+        trans_matrix['u'] = np.random.uniform(low=-np.sqrt(3/self.k), high=np.sqrt(3/self.k), size=(self.tag_dim, self.k))
+        trans_matrix['i'] = np.random.uniform(low=-np.sqrt(3/self.k), high=np.sqrt(3/self.k), size=(self.tag_dim, self.k))
         return latent_vector, trans_matrix
 
     def _init_data(self, data, validation=None):
@@ -116,7 +118,11 @@ class TransPITF:
         return r
 
     def _sigmoid(self, x):
-        return 1.0 / (1.0 + np.exp(-x))
+        if x < -709:
+            return 1.0
+        else:
+            m = 1.0 / (1.0 + np.exp(-x))
+            return m
 
     def _score(self, data):
         """
@@ -154,27 +160,45 @@ class TransPITF:
                     nt = self._draw_negative_sample(u, i)
                     neg_sample -= 1
                     y_diff = self.y(u, i, t) - self.y(u, i, nt)
+                    if y_diff < -700:
+                        print(u)
+                        print(self.latent_vector_['u'][u])
+                        print(i)
+                        print(self.latent_vector_['i'][i])
+                        print("positive: " + str(t))
+                        print(self.latent_vector_['t'][t])
+                        print("negative: : " + str(nt))
+                        print(self.latent_vector_['t'][nt])
+                        print(self.trans_matrix['u'])
+                        print(self.trans_matrix['i'])
+                        print(np.dot(self.latent_vector_['t'][t], user_trans))
+                        print(np.dot(self.latent_vector_['t'][t], item_trans))
+                        return
                     delta = 1-self._sigmoid(y_diff)
                     user_vec = self.latent_vector_['u'][u]
+                    user_vec.shape = (1, self.k)
                     item_vec = self.latent_vector_['i'][i]
+                    item_vec.shape = (1, self.k)
                     tag_vec = self.latent_vector_['t'][t]
+                    tag_vec.shape = (1, self.tag_dim)
                     nt_vec = self.latent_vector_['t'][nt]
+                    nt_vec.shape = (1, self.tag_dim)
                     user_trans = self.trans_matrix['u']
                     item_trans = self.trans_matrix['i']
                     self.latent_vector_['u'][u] += self.alpha * (
-                            delta * (np.dot(tag_vec, user_trans) - np.dot(nt_vec, user_trans)) - self.lamb * user_vec)
+                            delta * (np.dot(tag_vec, user_trans) - np.dot(nt_vec, user_trans)) - self.lamb * user_vec)[0]
                     self.latent_vector_['i'][i] += self.alpha * (
-                            delta * (np.dot(tag_vec, item_trans) - np.dot(nt_vec, item_trans)) - self.lamb * item_vec)
+                            delta * (np.dot(tag_vec, item_trans) - np.dot(nt_vec, item_trans)) - self.lamb * item_vec)[0]
                     self.latent_vector_['t'][t] += self.alpha * (delta * (
                                 np.dot(user_vec, user_trans.transpose()) + np.dot(item_vec, item_trans.transpose()) -
-                                self.lamb * tag_vec))
+                                self.lamb * tag_vec))[0]
                     self.latent_vector_['t'][nt] += self.alpha * (delta * (-(
                             np.dot(user_vec, user_trans.transpose()) + np.dot(item_vec, item_trans.transpose())) -
-                                                                           self.lamb * nt_vec))
+                                                                           self.lamb * nt_vec))[0]
                     self.trans_matrix['u'] += self.alpha*(delta*(np.dot(tag_vec.transpose(), user_vec) - np.dot(
-                        nt_vec.transpose(), user_vec)) - self.lamb * user_trans)
+                        nt_vec.transpose(), user_vec)) - self.lamb_trans * user_trans)
                     self.trans_matrix['i'] += self.alpha*(delta*(np.dot(tag_vec.transpose(), item_vec) - np.dot(
-                            nt_vec.transpose(), item_vec)) - self.lamb * item_trans)
+                            nt_vec.transpose(), item_vec)) - self.lamb_trans * item_trans)
             if self.verbose == 1:
                 self.evaluate()
                 # print("%s\t%s" % (self.max_iter-remained_iter, self._score(validation)))

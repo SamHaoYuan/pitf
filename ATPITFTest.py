@@ -20,10 +20,10 @@ movielens_test_all[:, -1] = (movielens_test_all[:, -1] - 1135429431000) / (24*36
 movielens_test = movielens_test_all.astype(int)
 # 将movielens按照处理为序列数据
 
-learnRate = 0.0001
+learnRate = 0.01
 lam = 0.00005
 dim = 64
-iter_ = 100
+iter_ = 200
 init_st = 0.01
 gamma = 0.2
 
