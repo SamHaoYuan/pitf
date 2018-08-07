@@ -82,7 +82,7 @@ class ATPITF:
         for u in self.userTimeList.keys():
             # 每一个user，处理为tag,time列表，可以根据实际情况计算权重
             self.userTimeList[u] = np.array(self.userTimeList[u])
-            if len(self.userTimeList[u]) > 5:
+            if len(self.userTimeList[u]) > 2:
                 short_memory_list = self.userTimeList[u][:, 2].argsort()[-10:]
                 for index in short_memory_list:
                     self.userShortMemory[u].append(self.userTimeList[u][index])
@@ -197,7 +197,7 @@ class ATPITF:
                         user_nt_vec = self.latent_vector_['tu'][nt]
                         item_t_vec = self.latent_vector_['ti'][t]
                         item_nt_vec = self.latent_vector_['ti'][nt]
-                        self.latent_vector_['u'][u] += self.alpha * (delta * (user_t_vec - user_nt_vec) - self.lamb * user_vec)
+                        self.latent_vector_['u'][u] += self.alpha * (delta * (1-self.gamma)*(user_t_vec - user_nt_vec) - self.lamb * user_vec)
                         self.latent_vector_['i'][i] += self.alpha * (delta * (item_t_vec - item_nt_vec) - self.lamb * item_vec)
                         if t not in history_tag: # 如果tag不在历史记录中，则梯度只是多了一个上下文， 否则将要考虑历史记录存在的梯度
                             self.latent_vector_['tu'][t] += self.alpha * (delta * ((1-self.gamma)*user_vec+self.gamma*c)- self.lamb * user_t_vec)
@@ -210,7 +210,7 @@ class ATPITF:
                         # self.latent_vector_['tu'][nt] += self.alpha * (delta * -self.latent_vector_['u'][u] - self.lamb * self.latent_vector_['tu'][nt])
                         self.latent_vector_['ti'][t] += self.alpha * (delta * item_vec - self.lamb * item_t_vec)
                         self.latent_vector_['ti'][nt] += self.alpha * (delta * -item_vec - self.lamb * item_nt_vec)
-                    if len(history) > 5:
+                    if len(history) > 2:
                         history.pop(0)
                     history.append(self.userTimeList[u][index])
                     history_tag.add(t)

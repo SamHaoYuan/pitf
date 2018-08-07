@@ -11,14 +11,17 @@ class ATPITF:
         """
         数据以numpy的结构输入，为了后续的采样和顺序训练的方便，我们还是需要进行一定的处理
         对于同一个用户，数据必须的用于训练，同时有两种注意力机制的方法：
-        ·如果采用时间注意力，基于时间衰减分配item权重，可以直接将这个向量当做user embedding，也可以与user embedding进行
-        简单的Merge操作
-            1.我们按照0.5的比例，直接将两个embedding进行拼接（相加）
         ·基于正常计算的attention,可以直接和user embedding进行权重计算，然后进行拼接
+        这个方法里面，我们每次的attention，是在user embedding层面计算，user偏好
         直接用
         任意一种方法，都需要重新推导梯度下降公式
         另外，我们目前仍然是以PITF的角度进行的优化，但是需要遍历一个用户的所有序列
         后续可以考虑，从神经网络的角度进行优化
+
+        从神经网络的角度来思考模型：
+        1.Embedding layer 将每个序列的user, item, tag 映射为向量
+        2.Attention Net
+        3.输出层
         :param alpha: 梯度下降速率
         :param lamb: 正则化参数
         :param k: 隐向量维度
@@ -197,7 +200,8 @@ class ATPITF:
                         user_nt_vec = self.latent_vector_['tu'][nt]
                         item_t_vec = self.latent_vector_['ti'][t]
                         item_nt_vec = self.latent_vector_['ti'][nt]
-                        self.latent_vector_['u'][u] += self.alpha * (delta * (user_t_vec - user_nt_vec) - self.lamb * user_vec)
+                        gra_u = self._cal_gra_t(user_vec, history)
+                        self.latent_vector_['u'][u] += self.alpha * (delta *(1-self.gamma)*(user_t_vec - user_nt_vec) - self.lamb * user_vec)
                         self.latent_vector_['i'][i] += self.alpha * (delta * (item_t_vec - item_nt_vec) - self.lamb * item_vec)
                         if t not in history_tag: # 如果tag不在历史记录中，则梯度只是多了一个上下文， 否则将要考虑历史记录存在的梯度
                             self.latent_vector_['tu'][t] += self.alpha * (delta * ((1-self.gamma)*user_vec+self.gamma*c)- self.lamb * user_t_vec)
@@ -221,17 +225,24 @@ class ATPITF:
                 break
         return
 
-    def _cal_context(self, history, time):
-        c = np.zeros(self.k)
-        weights = []
+    def _cal_softmax_weight(self, u, history):
+        weights = list()
         if list(history):
             sum_w = 0
             for pre_i, pre_t, pre_time in history:
-                weight = self._cal_time_weight(pre_time, time)
-                sum_w += weight
-                weights.append((pre_t, weight))
-            for pre_t, weight in weights:
-                c = c + weight * self.latent_vector_['tu'][pre_t]/sum_w
+                t_vec = self.latent_vector_['tu'][pre_t]
+                sum_w += np.exp(np.dot(u, t_vec))
+            for pre_i, pre_t, pre_time in history:
+                t_vec = self.latent_vector_['tu'][pre_t]
+                weight = np.exp(np.dot(u, t_vec))/sum_w
+                weights.append([pre_t, weight])
+        return np.array(weights)
+
+    def _cal_context(self, u, history):
+        c = np.zeros(self.k)
+        weights = self._cal_softmax_weight(u, history)
+        for pre_t, weight in weights:
+            c = c + weight * self.latent_vector_['tu'][pre_t]
         return c
 
     def _cal_gra_t(self, history, time, t):
@@ -241,6 +252,23 @@ class ATPITF:
                 weight = self._cal_time_weight(pre_time, time)
                 extra_c = extra_c + weight*self.latent_vector_['tu'][pre_t]
         return extra_c
+
+    def _cal_gra_u(self, u, history):
+        extra_u = np.zeros(self.k)
+        weights = list()
+        if list(history):
+            sum_w = 0
+            for pre_i, pre_t, pre_time in history:
+                t_vec = self.latent_vector_['tu'][pre_t]
+                sum_w += np.exp(np.dot(u, t_vec))
+            for pre_i, pre_t, pre_time in history:
+                t_vec = self.latent_vector_['tu'][pre_t]
+                weight = np.exp(np.dot(u, t_vec)) / sum_w
+                weights.append([pre_t, weight])
+        return np.array(weights)
+        for pre_i, pre_t, pre_time in history:
+            t_vec = self.latent_vector_['tu'][pre_t]
+
 
     def y(self, u, i, t, u_m):
         """
@@ -253,7 +281,7 @@ class ATPITF:
         """
         return self.latent_vector_['tu'][t].dot((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma * u_m) + self.latent_vector_['ti'][t].dot(self.latent_vector_['i'][i])
 
-    def predict(self, u, i, time):
+    def predict(self, u, i):
         """
         给定用户和tag，推荐得分最高的tag
         :param u:
@@ -261,9 +289,9 @@ class ATPITF:
         :return: 返回 tag id
         """
         # 找出该时间点前，这个用户打过的tag
-        c = self._cal_context(self.userShortMemory[u], time)
+        u_m = self._cal_context(u, self.userShortMemory[u])
         # 使用权重组合上下文向量
-        y = self.latent_vector_['tu'].dot((1-self.gamma)*self.latent_vector_['u'][u]+self.gamma*c) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
+        y = self.latent_vector_['tu'].dot((1-self.gamma)*self.latent_vector_['u'][u]+self.gamma*u_m) + self.latent_vector_['ti'].dot(self.latent_vector_['i'][i])
         return y.argmax()
 
     def predict2(self, x):
@@ -275,9 +303,9 @@ class ATPITF:
         y = self.latent_vector_['u'][x[:, 0]].dot(self.latent_vector_['tu'].T) + self.latent_vector_['i'][x[:, 1]].dot(self.latent_vector_['ti'].T)
         return y.argmax(axis=1)
 
-    def predict_top_k(self, u, i, time, k=5):
-        c = self._cal_context(self.userShortMemory[u], time)
-        y = self.latent_vector_['tu'].dot((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma*c) + self.latent_vector_['ti'].dot(
+    def predict_top_k(self, u, i, k=5):
+        u_m = self._cal_context(self.userShortMemory[u])
+        y = self.latent_vector_['tu'].dot((1-self.gamma)*self.latent_vector_['u'][u] + self.gamma*u_m) + self.latent_vector_['ti'].dot(
             self.latent_vector_['i'][i])
         return y.argsort()[-k:]  # 按降序进行排列
 
