@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from NeuralPITF import NeuralPITF, PITF_Loss
-import torch
-from torch.utils import data
+from NeuralPITF import NeuralPITF, PITF_Loss, DataSet
+from torch.autograd import Variable
+# from torch.utils import data
 import torch.optim as optim
+import torch
 
 # 在1:1 正例负例采样的情况下，测试movielens数据集
 
@@ -12,28 +13,6 @@ movielens = movielens_all[:, 0:-1].astype(int)
 
 movielens_test_all = np.genfromtxt('data/movielens/all_id_core3_test', delimiter='\t', dtype=float)
 movielens_test = movielens_test_all[:, 0:-1].astype(int)
-
-dataloader = data.DataLoader()
-
-def _calc_number_of_dimensions(data, validation):
-    """
-    *计算数据集中，user,item,tag最大数量（数据维度，data_shape)
-    :param data:
-    :param validation:
-    :return:
-    """
-    u_max = -1
-    i_max = -1
-    t_max = -1
-    for u, i, t in data:
-        if u > u_max: u_max = u
-        if i > i_max: i_max = i
-        if t > t_max: t_max = t
-    for u, i, t in validation:
-        if u > u_max: u_max = u
-        if i > i_max: i_max = i
-        if t > t_max: t_max = t
-    return u_max + 1, i_max + 1, t_max + 1
 
 
 def train(data, test):
@@ -44,23 +23,64 @@ def train(data, test):
     learnRate = 0.01
     lam = 0.00005
     dim = 64
-    iter_ = 500
+    iter_ = 100
     init_st = 0.01
     # 计算numUser, numItem, numTag
-    numUser, numItem, numTag = _calc_number_of_dimensions(data, test)
-    model = NeuralPITF(numUser, numItem,numTag, dim, init_st).cuda()
+    dataload = DataSet(data, test)
+    num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
+    model = NeuralPITF(num_user, num_item, num_tag, dim, init_st).cuda()
     # 对每个正样本进行负采样
-    loss_function = PITF_Loss()
+    loss_function = PITF_Loss().cuda()
     opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
     for epoch in range(iter_):
+        losses=[]
         for sample in data:
-            ne_sample = 1
+            numNeg = 10
+            input_ = sample
+            while numNeg >= 0:
+                numNeg -= 1
+                neg = dataload.draw_negative_sample(num_tag, input_)
+                sample = Variable(torch.LongTensor(input_)).cuda()
+                neg = Variable(torch.LongTensor(neg)).cuda()
+                r_p = model(sample)
+                r_n = model(neg)
+                opti.zero_grad()
+                # print(model.embedding.userVecs.weight)
+                loss = loss_function(r_p, r_n)
+                loss.backward()
+                opti.step()
+                losses.append(loss.data)
+        precision = 0
+        recall = 0
+        count = 0
+        validaTagSet = dataload.validaTagSet
+        for u in validaTagSet.keys():
+            for i in validaTagSet[u].keys():
+                number = 0
+                tags = validaTagSet[u][i]
+                tagsNum = len(tags)
+                y_pre = model.predict_top_k(u, i, 5)
+                for tag in y_pre:
+                    if tag in tags:
+                        number += 1
+                precision = precision + float(number / 5)
+                recall = recall + float(number / tagsNum)
+                count += 1
+        precision = precision / count
+        recall = recall / count
+        if precision==0 and recall == 0:
+            f_score = 0
+        else:
+            f_score = 2 * (precision * recall) / (precision + recall)
+        print("Precisions: " + str(precision))
+        print("Recall: " + str(recall))
+        print("F1: " + str(f_score))
+        print("==================================")
 
 
-
-
-
+train(movielens, movielens_test)
 # model = NeuralPITF(learnRate, lam, dim, iter_, init_st, verbose=1)
 
 # model.fit(movielens, movielens_test, 10)
