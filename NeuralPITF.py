@@ -2,8 +2,9 @@ import torch as t
 from torch.autograd import Variable
 import torch.nn as nn
 import numpy as np
+import random
 import torch.nn.functional as F
-
+random.seed(1)
 
 class InputToVector(nn.Module):
     """
@@ -65,8 +66,8 @@ class NeuralPITF(nn.Module):
         :param k:
         :return:
         """
-        u_id = t.LongTensor([u])[0]
-        i_id = t.LongTensor([i])[0]
+        u_id = t.LongTensor([u]).cuda()[0]
+        i_id = t.LongTensor([i]).cuda()[0]
         user_vec = self.embedding.userVecs(u_id)
         item_vec = self.embedding.itemVecs(i_id)
         y = user_vec.view(1, len(user_vec)).mm(self.embedding.tagUserVecs.weight.t()) + item_vec.view(1, len(item_vec)).mm(
@@ -154,16 +155,158 @@ class DataSet:
             if t > t_max: t_max = t
         return u_max + 1, i_max + 1, t_max + 1
 
-    def draw_negative_sample(self, num_tag, pos):
+    def get_batch(self, all_data, batch_size):
+        random.shuffle(all_data)
+        sindex = 0
+        eindex = batch_size
+        while eindex < len(all_data):
+            batch = all_data[sindex: eindex]
+            # 对每一行数据进行负采样，组成新的sample
+            temp = eindex
+            eindex = eindex + batch_size
+            sindex = temp
+            yield batch
+
+        if eindex >= len(all_data):
+            batch = all_data[sindex:]
+            yield batch
+
+    def draw_negative_sample(self, num_tag, pos, pairwise=False):
         """
         负样本采样
-        :param t: 当前正样本 index （此处应为正样本集合）
-        :return: 负样本index
         这里要注意，采样应该是从当前User-item的tag集合中，找出一个没被使用过的tag
         """
 
-        u, i = pos[0], pos[1]
+        u, i, t = pos[0], pos[1], pos[2]
         r = np.random.randint(num_tag)  # sample random index
         while r in self.trainTagSet[u][i]:
             r = np.random.randint(num_tag)  # repeat while the same index is sampled
-        return [u, i, r]
+        return [u, i, t, r] if pairwise else [u, i, r]
+
+    def get_negative_samples(self, num_tag, pairwise=False, num=10):
+        all_data = []
+        for pos in self.data:
+            k = num
+            while k > 0:
+                k -=1
+                one_sample = self.draw_negative_sample(num_tag, pos, pairwise)
+                all_data.append(one_sample)
+        return np.array(all_data)
+
+
+
+class SinglePITF(nn.Module):
+    """
+    使用Pytorch，基于神经网络的思想实现PITF，注意，输入数据为一个pairwise(u,i,pos_t, neg_t)
+    """
+    def __init__(self, numUser, numItem, numTag, k, init_st):
+        super(SinglePITF, self).__init__()
+        self.userVecs = nn.Embedding(numUser, k)
+        self.itemVecs = nn.Embedding(numItem, k)
+        self.tagUserVecs = nn.Embedding(numTag, k)
+        self.tagItemVecs = nn.Embedding(numTag, k)
+        self._init_weight(init_st)
+
+    def _init_weight(self, init_st):
+        self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
+        self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
+        self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
+        self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
+
+    def forward(self, x):
+        """
+        user_id = x[0]
+        item_id = x[1]
+        pos_id = x[2]
+        neg_id = x[3]
+
+        user_vec = self.userVecs(user_id)
+        item_vec = self.itemVecs(item_id)
+        tag_user_vec = self.tagUserVecs(pos_id)
+        tag_item_vec = self.tagItemVecs(pos_id)
+        neg_tag_user_vec = self.tagUserVecs(neg_id)
+        neg_tag_item_vec = self.tagItemVecs(neg_id)
+        r = t.sum(user_vec * tag_user_vec) + t.sum(item_vec * tag_item_vec) - (t.sum(user_vec * neg_tag_user_vec) + t.sum(
+            item_vec*neg_tag_item_vec
+        ))
+        return r
+        """
+        if len(x.size()) == 1:
+            x = x.view(1, len(x))
+        user_id = x[:, 0]
+        item_id = x[:, 1]
+        pos_id = x[:, 2]
+        neg_id = x[:, 3]
+
+        user_vec = self.userVecs(user_id)
+        item_vec = self.itemVecs(item_id)
+        tag_user_vec = self.tagUserVecs(pos_id)
+        tag_item_vec = self.tagItemVecs(pos_id)
+        neg_tag_user_vec = self.tagUserVecs(neg_id)
+        neg_tag_item_vec = self.tagItemVecs(neg_id)
+        r = t.sum(user_vec * tag_user_vec, dim=1) + t.sum(item_vec * tag_item_vec, dim=1) - (
+                t.sum(user_vec * neg_tag_user_vec, dim=1) + t.sum(item_vec*neg_tag_item_vec, dim=1))
+        return r
+    def predict_top_k(self, u, i, k=5):
+        """
+        给定User 和 item  根据模型返回前k个tag
+        :param u:
+        :param i:
+        :param k:
+        :return:
+        """
+        u_id = t.LongTensor([u]).cuda()[0]
+        i_id = t.LongTensor([i]).cuda()[0]
+        user_vec = self.userVecs(u_id)
+        item_vec = self.itemVecs(i_id)
+        y = user_vec.view(1, len(user_vec)).mm(self.tagUserVecs.weight.t()) + item_vec.view(1, len(item_vec)).mm(
+            self.tagItemVecs.weight.t())
+        return y.topk(k)[1]  # 按降序进行排列
+
+
+class SinglePITF_Loss(nn.Module):
+    """
+    定义PITF的loss function
+    """
+    def __init__(self):
+        super(SinglePITF_Loss, self).__init__()
+        print("Use the BPR for Optimization")
+
+    def forward(self, r):
+        return t.sum(-t.log(t.sigmoid(r)))
+
+
+class TimeAttentionPITF(SinglePITF):
+    """
+    基于时间衰减的attention权重的PITF
+    这个网络中，我们以序列的形式进行输入
+    1.将用户的行为序列，分割为固定长度大小，如一条sample，包含一个用户的 m 次 tag 行为（需要注意，如果不足m次，需要进行
+    让网络忽略
+    2.每一条sample的每一次行为进行embedding
+    3.根据时间长度计算权重，并分配给sample中的tag，然后和user建立组合向量作为user_vec
+    4.其他内容不变
+
+    出于加快训练的目的，应当思考如何进行向量化运算
+    """
+    def __init__(self, numUser, numItem, numTag, k, init_st):
+        super(TimeAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st)
+
+    def forward(self, x):
+        """
+        :param x: m 个 [user, item, tag] 组成的 sample
+        :return:
+        """
+        user_vec_ids = x[:, 0]
+        item_vec_ids = x[:, 1]
+        tag_vec_ids = x[:, 2]
+        user_vecs = self.userVecs(user_vec_ids)
+        item_vecs = self.itemVecs(item_vec_ids)
+        user_tag_vecs = self.tagUserVecs(tag_vec_ids)
+        item_tag_vecs = self.tagItemVecs(tag_vec_ids)
+
+    def TimeAttention(self, x):
+        """
+
+        :param x:
+        :return:
+        """
