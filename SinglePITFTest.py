@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
+import torch
 import numpy as np
+import random
+random.seed(1)
+torch.cuda.manual_seed(1)
+torch.manual_seed(1)
+np.random.seed(1)
 from NeuralPITF import SinglePITF, SinglePITF_Loss, DataSet
 from torch.autograd import Variable
 # from torch.utils import data
 import torch.optim as optim
-import torch
 import datetime
+
+
 
 # 在1:1 正例负例采样的情况下，测试movielens数据集
 
@@ -20,7 +27,7 @@ def train(data, test):
     该函数主要作用： 定义网络；定义数据，定义损失函数和优化器，计算重要指标，开始训练（训练网络，计算在测试集上的指标）
     :return:
     """
-    learnRate = 0.01
+    learnRate = 0.05
     lam = 0.00005
     dim = 64
     iter_ = 500
@@ -37,6 +44,8 @@ def train(data, test):
     opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
     opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
+    best_result = 0
+    best_result_state = model.state_dict()
     for epoch in range(iter_):
         all_data = dataload.get_negative_samples(num_tag, True, 100)
         losses = []
@@ -81,9 +90,14 @@ def train(data, test):
         print("Precisions: " + str(precision))
         print("Recall: " + str(recall))
         print("F1: " + str(f_score))
+        # 将模型最好时的效果保存下来
+        if f_score > best_result:
+            best_result = f_score
+            best_result_state = model.state_dict()   
+        print("best result: " + str(best_result))
         print("==================================")
-    torch.save(model, "net.pkl")
-    torch.save(model.state_dict(), "net_params.pkl")
+    # torch.save(model, "net.pkl")
+    torch.save(best_result_state, "net_params.pkl")
 
 
 train(movielens, movielens_test)

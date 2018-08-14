@@ -36,10 +36,12 @@ def train(data, test):
     # 每个epoch中的sample包含一个正样本和j个负样本
     for epoch in range(iter_):
         losses=[]
+        n = 0
         for sample in data:
+            n += 1
             numNeg = 10
             input_ = sample
-            while numNeg >= 0:
+            while numNeg > 0:
                 numNeg -= 1
                 neg = dataload.draw_negative_sample(num_tag, input_)
                 sample = Variable(torch.LongTensor(input_)).cuda()
@@ -52,6 +54,8 @@ def train(data, test):
                 loss.backward()
                 opti.step()
                 losses.append(loss.data)
+            if n % 1000 == 0:
+                print ("the loss of %s sample in %s iter is : " %(str(epoch), str(n)) + str(np.mean(losses)))
         precision = 0
         recall = 0
         count = 0
