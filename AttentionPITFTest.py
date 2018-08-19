@@ -32,7 +32,7 @@ def train(data, test, m, gamma):
     learnRate = 0.05
     lam = 0.00005
     dim = 64
-    iter_ = 100
+    iter_ = 200
     init_st = 0.01
     m = m
     gamma = gamma
@@ -42,7 +42,7 @@ def train(data, test, m, gamma):
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
     model = AttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
-    torch.save(model.state_dict(), 'attention_initial_params')
+    # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
     opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
@@ -50,7 +50,7 @@ def train(data, test, m, gamma):
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
     best_result_state = model.state_dict()
-    best_file = open('Attention_best_params.txt', 'a')
+    # best_file = open('Attention_best_params.txt', 'a')
     for epoch in range(iter_):
         all_data = dataload.get_sequential(num_tag, m, 100)
         all_data = all_data[:, :4 + m]
@@ -106,12 +106,12 @@ def train(data, test, m, gamma):
         print("best result: " + str(best_result))
         print("==================================")
     # torch.save(model, "net.pkl")
-    torch.save(best_result_state, "attention_net_params.pkl")
-    best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\n')
-    best_file.close()
+    # torch.save(best_result_state, "attention_net_params.pkl")
+    # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
+    # best_file.close()
 
-m_params = [2,4,5,6,8,10]
-gamma_params = [0.2, 0.4, 0.6, 0.8]
+m_params = [8]
+gamma_params = [0.8]
 for m in m_params:
     for gamma in gamma_params:
         train(movielens, movielens_test, m, gamma)

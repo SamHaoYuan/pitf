@@ -28,9 +28,9 @@ def train(data, test):
     :return:
     """
     learnRate = 0.001
-    lam = 0.00005
+    lam = 0.000001
     dim = 64
-    iter_ = 500
+    iter_ = 100
     init_st = 0.01
     batch_size = 100
     n = 1000
