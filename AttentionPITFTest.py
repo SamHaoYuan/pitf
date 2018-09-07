@@ -6,7 +6,7 @@ random.seed(1)
 torch.cuda.manual_seed(1)
 torch.manual_seed(1)
 np.random.seed(1)
-from NeuralPITF import AttentionPITF, SinglePITF_Loss, DataSet
+from NeuralPITF import AttentionPITF, SinglePITF_Loss, DataSet, RNNAttentionPITF
 from torch.autograd import Variable
 # from torch.utils import data
 import torch.optim as optim
@@ -29,10 +29,10 @@ def train(data, test, m, gamma):
     
     :return:
     """
-    learnRate = 0.05
+    learnRate = 0.01
     lam = 0.00005
     dim = 64
-    iter_ = 200
+    iter_ = 100
     init_st = 0.01
     m = m
     gamma = gamma
@@ -41,11 +41,13 @@ def train(data, test, m, gamma):
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    model = AttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
+    model = RNNAttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
+    # model = AttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
-    opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    # opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
     opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
@@ -110,8 +112,8 @@ def train(data, test, m, gamma):
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
     # best_file.close()
 
-m_params = [8]
-gamma_params = [0.8]
+m_params = [5]
+gamma_params = [0.5]
 for m in m_params:
     for gamma in gamma_params:
         train(movielens, movielens_test, m, gamma)

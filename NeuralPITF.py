@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 import torch as t
 from torch.autograd import Variable
 import torch.nn as nn
 import numpy as np
 import random
 import torch.nn.functional as F
+
 
 class InputToVector(nn.Module):
     """
@@ -389,6 +391,7 @@ class TransPITF(nn.Module):
         self.userTransM = nn.Linear(k, k)
         self.itemTransM = nn.Linear(k, k)
         self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
 
     def _init_weight(self, init_st):
         self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
@@ -410,10 +413,10 @@ class TransPITF(nn.Module):
         tag_vec = self.tagVecs(pos_id)
         neg_tag_vec = self.tagVecs(neg_id)
 
-        user_tag_vec = self.relu(self.userTransM(tag_vec))
-        item_tag_vec = self.relu(self.itemTransM(tag_vec))
-        neg_user_tag_vec = self.relu(self.userTransM(neg_tag_vec))
-        neg_item_tag_vec = self.relu(self.itemTransM(neg_tag_vec))
+        user_tag_vec = self.sigmoid(self.userTransM(tag_vec))
+        item_tag_vec = self.sigmoid(self.itemTransM(tag_vec))
+        neg_user_tag_vec = self.sigmoid(self.userTransM(neg_tag_vec))
+        neg_item_tag_vec = self.sigmoid(self.itemTransM(neg_tag_vec))
 
         r = t.sum(user_vec * user_tag_vec, dim=1) + t.sum(item_vec * item_tag_vec, dim=1) - (
                 t.sum(user_vec * neg_user_tag_vec, dim=1) + t.sum(item_vec * neg_item_tag_vec, dim=1))
@@ -431,8 +434,8 @@ class TransPITF(nn.Module):
         i_id = t.LongTensor([i]).cuda()[0]
         user_vec = self.userVecs(u_id)
         item_vec = self.itemVecs(i_id)
-        y = user_vec.view(1, len(user_vec)).mm(self.relu(self.userTransM(self.tagVecs.weight)).t()) + item_vec.view(1, len(
-            item_vec)).mm(self.relu(self.itemTransM(self.tagVecs.weight)).t())
+        y = user_vec.view(1, len(user_vec)).mm(self.sigmoid(self.userTransM(self.tagVecs.weight)).t()) + item_vec.view(1, len(
+            item_vec)).mm(self.sigmoid(self.itemTransM(self.tagVecs.weight)).t())
         return y.topk(k)[1]  # 按降序进行排列
 
 
@@ -558,6 +561,8 @@ class AttentionPITF(nn.Module):
         self.itemVecs = nn.Embedding(numItem, k)
         self.tagUserVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.tagItemVecs = nn.Embedding(numTag, k, padding_idx=0)
+        self.attentionMLP = nn.Linear(k, k)
+        self.relu = nn.ReLU()
         self.m = m
         self.k = k
         self.gamma = gamma
@@ -568,7 +573,6 @@ class AttentionPITF(nn.Module):
         self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
         self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
         self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
-
 
     def forward(self, x):
         """
@@ -593,6 +597,144 @@ class AttentionPITF(nn.Module):
 
         h = self.attention(user_vecs, tag_history_vecs)  # batch * k
         mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
+        r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
+                t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+        return r
+
+    def attention(self, u_vec, h_vecs):
+        """
+        这一层，我们可以尝试多种attention的方法：
+        方案1：query 为user， key为历史tag, value同样为历史tag，然后将user+tag组成为新的user embedding
+        方案2：query为user, key和value为tag进行一层MLP后的结果（从TransPITF的结果来看，进行MLP和激活后，或许可以得到一个好点的结果）
+        :param u_vec: （batch_size, k)
+        :param h_vecs (batch_size, m, k)
+        :return:
+        """
+        # batch_size = u_vec.size()[0]
+        # h_u_vec_ = self.relu(self.attentionMLP(u_vec))
+        # u_vec_ = h_u_vec_.unsqueeze(2)
+        u_vec_ = u_vec.unsqueeze(2)
+        tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
+        alpha = alpha.unsqueeze(1)
+        h = t.bmm(alpha, h_vecs)
+        return h.squeeze(1)
+
+    def predict_top_k(self, x, k=5):
+        """
+        给定User 和 item  记忆序列，根据模型返回前k个tag
+        输入sample:[u,i,m_1,m_2....m_j]
+        :param u:
+        :param i:
+        :param k:
+        :return:
+        """
+        user_vec_ids = x[:, 0]
+        item_vec_ids = x[:, 1]
+        tag_memory_ids = x[:, -self.m:]
+
+        user_vec = self.userVecs(user_vec_ids)
+        item_vec = self.itemVecs(item_vec_ids)
+        h_vecs = self.tagUserVecs(tag_memory_ids)
+        h = self.attention(user_vec, h_vecs)
+        mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
+        y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
+
+        return y.topk(k)[1]  # 按降序进行排列
+
+
+class RNNAttentionPITF(AttentionPITF):
+    """
+    基于RNN+attention机制的标签推荐模型
+    输入数据为 [u,i,t,neg_t,m_1,m_2,m_3...]
+
+    """
+
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
+        super(RNNAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma)
+        self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.5)
+
+    def forward(self, x):
+        """
+        user与attention之后的h组合为新的user embedding或：
+        直接将attention之后的向量作为user embedding
+        :param x:
+        :return:
+        """
+        user_vec_ids = x[:, 0]
+        item_vec_ids = x[:, 1]
+        tag_vec_ids = x[:, 2]
+        neg_tag_vec_ids = x[:, 3]
+        history_ids = x[:, -self.m:]
+
+        user_vecs = self.userVecs(user_vec_ids)
+        item_vecs = self.itemVecs(item_vec_ids)
+        user_tag_vecs = self.tagUserVecs(tag_vec_ids)
+        item_tag_vecs = self.tagItemVecs(tag_vec_ids)
+        neg_tag_user_vec = self.tagUserVecs(neg_tag_vec_ids)
+        neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
+        tag_history_vecs = self.tagUserVecs(history_ids)
+
+        out, out_final = self.lstm(tag_history_vecs)
+
+        h = self.attention(user_vecs, out)  # batch * k
+        mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
+        r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
+                t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+        return r
+
+    def attention(self, u_vec, h_vecs):
+        """
+        这一层，我们可以尝试多种attention的方法：
+        方案1：query 为user， key为历史tag, value同样为历史tag，然后将user+tag组成为新的user embedding
+        方案2：query为user, key和value为tag进行一层MLP后的结果（从TransPITF的结果来看，进行MLP和激活后，或许可以得到一个好点的结果）
+        :param u_vec: （batch_size, k)
+        :param h_vecs (batch_size, m, k)
+        :return:
+        """
+        # batch_size = u_vec.size()[0]
+        h_u_vec_ = self.relu(self.attentionMLP(u_vec))
+        u_vec_ = h_u_vec_.unsqueeze(2)
+        alpha = nn.functional.softmax(t.bmm(h_vecs, u_vec_).squeeze(2), 1)
+        alpha = alpha.unsqueeze(1)
+        h = t.bmm(alpha, h_vecs)
+        return h.squeeze(1)
+
+
+class TagAttentionPITF(AttentionPITF):
+    """
+    直接基于attention机制的PITF, attention tag层面上进行attention
+    输入数据为 [u,i,t,neg_t,m_1,m_2,m_3...]
+
+    """
+
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
+        super(TagAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma)
+
+    def forward(self, x):
+        """
+        user与attention之后的h组合为新的user embedding或：
+        直接将attention之后的向量作为user embedding
+        :param x:
+        :return:
+        """
+        user_vec_ids = x[:, 0]
+        item_vec_ids = x[:, 1]
+        tag_vec_ids = x[:, 2]
+        neg_tag_vec_ids = x[:, 3]
+        history_ids = x[:, -self.m:]
+
+        user_vecs = self.userVecs(user_vec_ids)
+        item_vecs = self.itemVecs(item_vec_ids)
+        user_tag_vecs = self.tagUserVecs(tag_vec_ids)
+        item_tag_vecs = self.tagItemVecs(tag_vec_ids)
+        neg_tag_user_vec = self.tagUserVecs(neg_tag_vec_ids)
+        neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
+        tag_history_vecs = self.tagUserVecs(history_ids)
+
+        h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
+        h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
+        mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
         r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
                 t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
