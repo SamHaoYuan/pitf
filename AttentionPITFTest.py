@@ -41,13 +41,13 @@ def train(data, test, m, gamma):
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    model = RNNAttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
-    # model = AttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
+    # model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
-    # opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
-    opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    # opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
     opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
@@ -77,7 +77,7 @@ def train(data, test, m, gamma):
         recall = 0
         count = 0
         validaTagSet = dataload.validaTagSet
-        validaTimeList = dataload.validaUserTimeList
+        
         for u in validaTagSet.keys():
             for i in validaTagSet[u].keys():
                 number = 0
@@ -111,7 +111,7 @@ def train(data, test, m, gamma):
     # torch.save(best_result_state, "attention_net_params.pkl")
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
     # best_file.close()
-
+    
 m_params = [5]
 gamma_params = [0.5]
 for m in m_params:

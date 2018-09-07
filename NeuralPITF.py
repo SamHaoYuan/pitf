@@ -200,7 +200,7 @@ class DataSet:
                 if u > u_max: u_max = u
                 if i > i_max: i_max = i
                 if tag > t_max: t_max = tag
-            return u_max + 1, i_max + 1, t_max + 1
+            return u_max + 1, i_max + 1, t_max + 2
         else:
             for u, i, tag, time in self.data:
                 if u > u_max: u_max = u
@@ -210,7 +210,7 @@ class DataSet:
                 if u > u_max: u_max = u
                 if i > i_max: i_max = i
                 if tag > t_max: t_max = tag
-            return u_max + 1, i_max + 1, t_max + 1
+            return u_max + 1, i_max + 1, t_max + 2
 
     def get_batch(self, all_data, batch_size):
         random.shuffle(all_data)
@@ -652,7 +652,7 @@ class RNNAttentionPITF(AttentionPITF):
 
     def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
         super(RNNAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma)
-        self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.5)
+        self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.2)
 
     def forward(self, x):
         """
@@ -693,9 +693,13 @@ class RNNAttentionPITF(AttentionPITF):
         :return:
         """
         # batch_size = u_vec.size()[0]
-        h_u_vec_ = self.relu(self.attentionMLP(u_vec))
-        u_vec_ = h_u_vec_.unsqueeze(2)
-        alpha = nn.functional.softmax(t.bmm(h_vecs, u_vec_).squeeze(2), 1)
+        # h_u_vec_ = self.relu(self.attentionMLP(u_vec))
+        # u_vec_ = h_u_vec_.unsqueeze(2)
+        # alpha = nn.functional.softmax(t.bmm(h_vecs, u_vec_).squeeze(2), 1)
+        u_vec_ = u_vec.unsqueeze(2)        
+        tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
+        
         alpha = alpha.unsqueeze(1)
         h = t.bmm(alpha, h_vecs)
         return h.squeeze(1)
