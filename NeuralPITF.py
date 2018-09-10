@@ -571,8 +571,8 @@ class AttentionPITF(nn.Module):
     def _init_weight(self, init_st):
         self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
         self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
-        self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
-        self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
+        # self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
+        # self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
 
     def forward(self, x):
         """
