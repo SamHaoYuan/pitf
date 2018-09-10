@@ -571,8 +571,8 @@ class AttentionPITF(nn.Module):
     def _init_weight(self, init_st):
         self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
         self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
-        self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
-        self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
+        # self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
+        # self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
 
     def forward(self, x):
         """
@@ -652,7 +652,8 @@ class RNNAttentionPITF(AttentionPITF):
 
     def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
         super(RNNAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma)
-        self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.2)
+        self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.5)
+        self.gru = nn.GRU(k,k,batch_first=True, dropout=0.5)
 
     def forward(self, x):
         """
@@ -675,8 +676,9 @@ class RNNAttentionPITF(AttentionPITF):
         neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
         tag_history_vecs = self.tagUserVecs(history_ids)
 
-        out, out_final = self.lstm(tag_history_vecs)
-
+        # out, out_final = self.gru(tag_history_vecs)
+        out, out_final = self.gru(tag_history_vecs)
+        
         h = self.attention(user_vecs, out)  # batch * k
         mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
         r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
