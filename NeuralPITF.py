@@ -771,14 +771,20 @@ class TagAttentionPITF(AttentionPITF):
         :return:
         """
         user_vec_ids = x[:, 0]
+        user_vec_ids = user_vec_ids.repeat(self.numTag, 1)
         item_vec_ids = x[:, 1]
+        item_vec_ids = item_vec_ids.repeat(self.numTag, 1)
         tag_memory_ids = x[:, -self.m:]
-
+        tag_memory_ids = tag_memory_ids.repeat(self.numTag, 1)
         user_vec = self.userVecs(user_vec_ids)
+        # user_vec = user_vec.repeat(self.numTag, 1)
         item_vec = self.itemVecs(item_vec_ids)
         h_vecs = self.tagUserVecs(tag_memory_ids)
-        h = self.attention(user_vec, h_vecs)
+        # h_vecs = h_vecs.repeat(self.numTag, 1)
+        h = self.attention(self.tagUserVecs.weight, h_vecs)
         mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
-        y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
+        y = t.squeeze(t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
+            1), self.tagItemVecs.weight.unsqueeze(2)))
 
+        y = y.squeeze(1,)
         return y.topk(k)[1]  # 按降序进行排列
