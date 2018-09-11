@@ -465,8 +465,6 @@ class TimeAttentionPITF(nn.Module):
     def _init_weight(self, init_st):
         self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
         self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
-        self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
-        self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
 
     def forward(self, x):
         """
@@ -741,8 +739,9 @@ class TagAttentionPITF(AttentionPITF):
         h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
         h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
         mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
+        mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
         r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
-                t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+                t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
 
     def attention(self, u_vec, h_vecs):
@@ -756,7 +755,8 @@ class TagAttentionPITF(AttentionPITF):
         """
         # batch_size = u_vec.size()[0]
         u_vec_ = u_vec.unsqueeze(2)
-        alpha = nn.functional.softmax(t.bmm(h_vecs, u_vec_).squeeze(2), 1)
+        tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
         alpha = alpha.unsqueeze(1)
         h = t.bmm(alpha, h_vecs)
         return h.squeeze(1)

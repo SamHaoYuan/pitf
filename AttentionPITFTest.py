@@ -6,7 +6,7 @@ random.seed(1)
 torch.cuda.manual_seed(1)
 torch.manual_seed(1)
 np.random.seed(1)
-from NeuralPITF import AttentionPITF, SinglePITF_Loss, DataSet, RNNAttentionPITF
+from NeuralPITF import AttentionPITF, SinglePITF_Loss, DataSet, RNNAttentionPITF, TagAttentionPITF
 from torch.autograd import Variable
 # from torch.utils import data
 import torch.optim as optim
@@ -41,25 +41,26 @@ def train(data, test, m, gamma):
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    # model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    model = TagAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
-    opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
-    # opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
+    # opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
     opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
-    best_result_state = model.state_dict()
+    # best_result_state = model.state_dict()
     # best_file = open('Attention_best_params.txt', 'a')
     for epoch in range(iter_):
+        # file_ = open('AttentionTureParam.txt', 'a')
         all_data = dataload.get_sequential(num_tag, m, 100)
         all_data = all_data[:, :4 + m]
         losses = []
         print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         for i, batch in enumerate(dataload.get_batch(all_data, batch_size)):
-
             # print(batch)
             # input_ = dataload.draw_negative_sample(num_tag, sample, True)
             r = model(torch.LongTensor(batch).cuda())
@@ -104,9 +105,13 @@ def train(data, test, m, gamma):
         # 将模型最好时的效果保存下来
         if f_score > best_result:
             best_result = f_score
-            best_result_state = model.state_dict()
+            # best_result_state = model.state_dict()
         print("best result: " + str(best_result))
         print("==================================")
+        # info = " [%02d/%d] gamma: %f the length m: %d " %(epoch, iter_, gamma, m)   
+        # file_.write(info + '\n')
+        # file_.write("Precision: " + str(precision) + "  Recall: " + str(recall)+ " F1: " + str(f_score) + " Best Result: " + str(best_result))
+        # file_.write('\r\n')
     # torch.save(model, "net.pkl")
     # torch.save(best_result_state, "attention_net_params.pkl")
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
@@ -114,6 +119,8 @@ def train(data, test, m, gamma):
 
 m_params = [5]
 gamma_params = [0.5]
+# m_params = [1,2,4,5,6,8,10]
+# gamma_params = [0.2,0.4,0.5, 0.6,0.8,1]
 for m in m_params:
     for gamma in gamma_params:
         train(movielens, movielens_test, m, gamma)
