@@ -43,7 +43,7 @@ def train(data, test, m=5, gamma=0.5):
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    model = TimeAttentionPITF(num_user, num_item, num_tag, dim, init_st, m, gamma).cuda()
+    model = TimeAttentionPITF(int(num_user+1), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'time_attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
@@ -126,7 +126,7 @@ for m in m_params:
         train(movielens, movielens_test, m, gamma)
 '''
 
-train(movielens, movielens_test, 10, 1)
+train(movielens, movielens_test, 5, 0.5)
 # train(movielens, movielens_test)
 # model = NeuralPITF(learnRate, lam, dim, iter_, init_st, verbose=1)
 

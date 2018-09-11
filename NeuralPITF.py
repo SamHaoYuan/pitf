@@ -501,7 +501,7 @@ class TimeAttentionPITF(nn.Module):
         :param timestamps: Tensor (batch_size, m) 记录每个tag的时间
         :return: c 历史行为组合的向量(batch_size, 64)
         """
-        batch_size = len(history_vecs)
+        # batch_size = len(history_vecs)
         # c = np.zeros(self.k)
         weight = self._cal_weight(timestamps, now_time)
         weight = weight.unsqueeze(1)
