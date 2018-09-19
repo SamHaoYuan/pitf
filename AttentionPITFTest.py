@@ -41,15 +41,15 @@ def train(data, test, m, gamma):
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    # model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
-    model = TagAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    # model = TagAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
-    # opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
-    opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
-    opti.zero_grad()
+    opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    # opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti.zero_grad()    
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
     # best_result_state = model.state_dict()
@@ -87,6 +87,7 @@ def train(data, test, m, gamma):
                 x_t = torch.LongTensor([u, i] + list(dataload.userShortMemory[u][:m])).cuda()
                 x_t = x_t.unsqueeze(0)
                 y_pre = model.predict_top_k(x_t)
+                # print(y_pre)
                 for tag in y_pre[0]:
                     if int(tag) in tags:
                         number += 1
@@ -117,8 +118,8 @@ def train(data, test, m, gamma):
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
     # best_file.close()
 
-m_params = [5]
-gamma_params = [0.5]
+m_params = [10]
+gamma_params = [0.6]
 # m_params = [1,2,4,5,6,8,10]
 # gamma_params = [0.2,0.4,0.5, 0.6,0.8,1]
 for m in m_params:

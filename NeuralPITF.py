@@ -770,21 +770,23 @@ class TagAttentionPITF(AttentionPITF):
         :param k:
         :return:
         """
+        numTag = len(self.tagItemVecs.weight)
         user_vec_ids = x[:, 0]
-        user_vec_ids = user_vec_ids.repeat(self.numTag, 1)
+        user_vec_ids = user_vec_ids.repeat(numTag, 1)
         item_vec_ids = x[:, 1]
-        item_vec_ids = item_vec_ids.repeat(self.numTag, 1)
+        item_vec_ids = item_vec_ids.repeat(numTag, 1)
         tag_memory_ids = x[:, -self.m:]
-        tag_memory_ids = tag_memory_ids.repeat(self.numTag, 1)
-        user_vec = self.userVecs(user_vec_ids)
+        tag_memory_ids = tag_memory_ids.repeat(numTag, 1)
+        user_vec = self.userVecs(user_vec_ids).squeeze(1)
+        # print(user_vec.size())
         # user_vec = user_vec.repeat(self.numTag, 1)
-        item_vec = self.itemVecs(item_vec_ids)
+        item_vec = self.itemVecs(item_vec_ids).squeeze(1)
         h_vecs = self.tagUserVecs(tag_memory_ids)
         # h_vecs = h_vecs.repeat(self.numTag, 1)
         h = self.attention(self.tagUserVecs.weight, h_vecs)
         mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
-        y = t.squeeze(t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
-            1), self.tagItemVecs.weight.unsqueeze(2)))
-
-        y = y.squeeze(1,)
-        return y.topk(k)[1]  # 按降序进行排列
+        #  print(mix_user_vec.size())
+        y = t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
+            1), self.tagItemVecs.weight.unsqueeze(2))
+        y = t.squeeze(y)
+        return y.topk(k)  # 按降序进行排列
