@@ -13,13 +13,32 @@ import torch.optim as optim
 import datetime
 
 # 在1:100正例负例采样的情况下，测试movielens数据集
-ini_time = 1135429431000
-movielens_all = np.genfromtxt('data/movielens/all_id_core3_train', delimiter='\t', dtype=float)
-movielens_all[:, -1] = (movielens_all[:, -1] - 1135429431000) / (24*3600*1000)
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+# ini_time = 1135429431000
+
+train_data_path = 'data/movielens/all_id_core1_train'
+test_data_path = 'data/movielens/all_id_core1_test'
+
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+
+movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
+ini_time = int(movielens_all[:, 3].min())
+movielens_all[:, -1] = (movielens_all[:, -1] - ini_time) / (24*3600*1000)
 movielens = movielens_all.astype(int)
 
-movielens_test_all = np.genfromtxt('data/movielens/all_id_core3_test', delimiter='\t', dtype=float)
-movielens_test_all[:, -1] = (movielens_test_all[:, -1] - 1135429431000) / (24*3600*1000)
+movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
+movielens_test_all[:, -1] = (movielens_test_all[:, -1] - ini_time) / (24*3600*1000)
 movielens_test = movielens_test_all.astype(int)
 
 def train(data, test, m, gamma):
@@ -41,8 +60,8 @@ def train(data, test, m, gamma):
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
-    # model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    # model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # model = TagAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
