@@ -12,15 +12,32 @@ from torch.autograd import Variable
 import torch.optim as optim
 import datetime
 
-
-
 # 在1:1 正例负例采样的情况下，测试movielens数据集
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+# ini_time = 1135429431000
 
-movielens_all = np.genfromtxt('data/movielens/all_id_core3_train', delimiter='\t', dtype=float)
+# train_data_path = 'data/movielens/all_id_core1_train'
+# test_data_path = 'data/movielens/all_id_core1_test'
+
+# train_data_path = 'data/lastFM/all_id_core1_train'
+# test_data_path = 'data/lastFM/all_id_core1_test'
+
+# train_data_path = 'data/lastFM/all_id_core3_train'
+# test_data_path = 'data/lastFM/all_id_core3_test'
+
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+
+train_data_path = 'data/delicious/all_id_core3_train'
+test_data_path = 'data/delicious/all_id_core3_test'
+
+movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
 movielens = movielens_all[:, 0:-1].astype(int)
 
-movielens_test_all = np.genfromtxt('data/movielens/all_id_core3_test', delimiter='\t', dtype=float)
+movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test = movielens_test_all[:, 0:-1].astype(int)
+
 
 def train(data, test):
     """
