@@ -14,12 +14,30 @@ import datetime
 
 # 在1:100正例负例采样的情况下，测试movielens数据集
 
-ini_time = 1135429431000
-movielens_all = np.genfromtxt('data/movielens/all_id_core3_train', delimiter='\t', dtype=float)
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+# ini_time = 1135429431000
+
+# train_data_path = 'data/movielens/all_id_core1_train'
+# test_data_path = 'data/movielens/all_id_core1_test'
+
+# train_data_path = 'data/lastFM/all_id_core1_train'
+# test_data_path = 'data/lastFM/all_id_core1_test'
+
+# train_data_path = 'data/lastFM/all_id_core3_train'
+# test_data_path = 'data/lastFM/all_id_core3_test'
+
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+
+train_data_path = 'data/delicious/all_id_core3_train'
+test_data_path = 'data/delicious/all_id_core3_test'
+
+movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
 movielens_all[:, -1] = (movielens_all[:, -1] - 1135429431000) / (24*3600*1000)
 movielens = movielens_all.astype(int)
 
-movielens_test_all = np.genfromtxt('data/movielens/all_id_core3_test', delimiter='\t', dtype=float)
+movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test_all[:, -1] = (movielens_test_all[:, -1] - 1135429431000) / (24*3600*1000)
 movielens_test = movielens_test_all.astype(int)
 

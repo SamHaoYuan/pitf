@@ -17,20 +17,20 @@ import datetime
 # test_data_path = 'data/movielens/all_id_core3_test'
 # ini_time = 1135429431000
 
-train_data_path = 'data/movielens/all_id_core1_train'
-test_data_path = 'data/movielens/all_id_core1_test'
+# train_data_path = 'data/movielens/all_id_core1_train'
+# test_data_path = 'data/movielens/all_id_core1_test'
+
+# train_data_path = 'data/lastFM/all_id_core1_train'
+# test_data_path = 'data/lastFM/all_id_core1_test'
+
+# train_data_path = 'data/lastFM/all_id_core3_train'
+# test_data_path = 'data/lastFM/all_id_core3_test'
 
 # train_data_path = 'data/movielens/all_id_core3_train'
 # test_data_path = 'data/movielens/all_id_core3_test'
 
-# train_data_path = 'data/movielens/all_id_core3_train'
-# test_data_path = 'data/movielens/all_id_core3_test'
-
-# train_data_path = 'data/movielens/all_id_core3_train'
-# test_data_path = 'data/movielens/all_id_core3_test'
-
-# train_data_path = 'data/movielens/all_id_core3_train'
-# test_data_path = 'data/movielens/all_id_core3_test'
+train_data_path = 'data/delicious/all_id_core3_train'
+test_data_path = 'data/delicious/all_id_core3_test'
 
 movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
 ini_time = int(movielens_all[:, 3].min())
@@ -137,8 +137,8 @@ def train(data, test, m, gamma):
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
     # best_file.close()
 
-m_params = [10]
-gamma_params = [0.6]
+m_params = [8]
+gamma_params = [0.5]
 # m_params = [1,2,4,5,6,8,10]
 # gamma_params = [0.2,0.4,0.5, 0.6,0.8,1]
 for m in m_params:
