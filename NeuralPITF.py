@@ -595,8 +595,16 @@ class AttentionPITF(nn.Module):
 
         h = self.attention(user_vecs, tag_history_vecs)  # batch * k
         mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
-        r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
-                t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+        mix_user_vecs = mix_user_vecs.unsqueeze(1)
+        user_tag_vecs = user_tag_vecs.unsqueeze(2)
+        item_vecs = item_vecs.unsqueeze(1)
+        item_tag_vecs = item_tag_vecs.unsqueeze(2)
+        neg_tag_user_vec = neg_tag_user_vec.unsqueeze(2)
+        neg_tag_item_vec = neg_tag_item_vec.unsqueeze(2)
+        r = t.bmm(mix_user_vecs, user_tag_vecs) + t.bmm(item_tag_vecs, item_tag_vecs) - (
+                t.bmm(mix_user_vecs, neg_tag_user_vec) + t.bmm(item_vecs, neg_tag_item_vec))
+        # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
+        #        t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
 
     def attention(self, u_vec, h_vecs):
