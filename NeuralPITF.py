@@ -751,8 +751,8 @@ class TagAttentionPITF(AttentionPITF):
         # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
         # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
         #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
-        user_tag_vecs_ = self.tag_map(t.cat(user_tag_vecs, h), 1)
-        neg_tag_user_vecs_ = self.tag_map(t.cat(neg_tag_user_vec, h_neg), 1)
+        user_tag_vecs_ = self.tag_map(t.cat((user_tag_vecs, h), 1))
+        neg_tag_user_vecs_ = self.tag_map(t.cat((neg_tag_user_vec, h_neg), 1))
         r = t.sum(user_vecs * user_tag_vecs_, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
                 t.sum(user_vecs * neg_tag_user_vecs_, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
@@ -798,7 +798,7 @@ class TagAttentionPITF(AttentionPITF):
         # h_vecs = h_vecs.repeat(self.numTag, 1)
         h = self.attention(self.tagUserVecs.weight, h_vecs)
         # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
-        user_tag_vecs = self.tag_map(t.cat(self.tagUserVecs.weight, h), 1)  # numTag * k
+        user_tag_vecs = self.tag_map(t.cat((self.tagUserVecs.weight, h), 1))  # numTag * k
         #  print(mix_user_vec.size())
         # y = t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
         #     1), self.tagItemVecs.weight.unsqueeze(2))
