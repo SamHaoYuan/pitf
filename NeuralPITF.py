@@ -560,6 +560,7 @@ class AttentionPITF(nn.Module):
         self.tagUserVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.tagItemVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.attentionMLP = nn.Linear(k, k)
+        self.user_tag_map = nn.Linear(2*k, k)
         self.relu = nn.ReLU()
         self.m = m
         self.k = k
@@ -594,7 +595,8 @@ class AttentionPITF(nn.Module):
         tag_history_vecs = self.tagUserVecs(history_ids)
 
         h = self.attention(user_vecs, tag_history_vecs)  # batch * k
-        mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
+        # mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
+        mix_user_vecs = self.user_tag_map(t.cat((user_vecs, h), 1))
         mix_user_vecs = mix_user_vecs.unsqueeze(1)
         user_tag_vecs = user_tag_vecs.unsqueeze(2)
         item_vecs = item_vecs.unsqueeze(1)
@@ -643,7 +645,8 @@ class AttentionPITF(nn.Module):
         item_vec = self.itemVecs(item_vec_ids)
         h_vecs = self.tagUserVecs(tag_memory_ids)
         h = self.attention(user_vec, h_vecs)
-        mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
+        # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
+        mix_user_vec = self.user_tag_map(t.cat((user_vec, h), 1))
         y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
 
         return y.topk(k)[1]  # 按降序进行排列
