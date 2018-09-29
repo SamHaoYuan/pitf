@@ -553,7 +553,7 @@ class AttentionPITF(nn.Module):
     输入数据为 [u,i,t,neg_t,m_1,m_2,m_3...]
 
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embedding):
         super(AttentionPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
@@ -565,11 +565,15 @@ class AttentionPITF(nn.Module):
         self.m = m
         self.k = k
         self.gamma = gamma
-        self._init_weight(init_st)
+        self._init_weight(init_st, init_embedding)
         
-    def _init_weight(self, init_st):
-        self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
-        self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
+    def _init_weight(self, init_st, init_embedding):
+        self.userVecs.weight = init_embedding[0]
+        self.itemVecs.weight = init_embedding[1]
+        self.tagUserVecs.weight[1:] = init_embedding[2]
+        self.tagItemVecs.weight[1:] = init_embedding[3]
+        # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
+        # self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
         # self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
         # self.tagItemVecs.weight = nn.init.normal(self.tagItemVecs.weight, 0, init_st)
 

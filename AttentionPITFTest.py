@@ -41,6 +41,33 @@ movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test_all[:, -1] = (movielens_test_all[:, -1] - ini_time) / (24*3600*1000)
 movielens_test = movielens_test_all.astype(int)
 
+user_vecs_path = 'PreVecs/movielens/UserVecs'
+item_vecs_path = 'PreVecs/movielens/ItemVecs'
+tag_user_vec_path = 'PreVecs/movielens/UserTagVecs'
+tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs'
+
+
+def handle_pre_vecs(file_path):
+    pre_vecs = np.genfromtxt(file_path, delimiter='\t', dtype=str)
+    a = pre_vecs[:, 0]
+    b = pre_vecs[:, -1]
+    for i in range(len(a)):
+        a[i] = a[i].replace('[', '')        
+    for i in range(len(b)):
+        b[i] = b[i].replace(']', '')   
+    pre_vecs[:, 0] = a
+    pre_vecs[:, -1] = b  
+    pre_vecs = pre_vecs.astype(float)
+    return pre_vecs
+
+
+user_vecs = handle_pre_vecs(user_vecs_path)
+item_vecs = handle_pre_vecs(item_vecs_path)
+tag_user_vecs = handle_pre_vecs(tag_user_vec_path)
+tag_item_vecs = handle_pre_vecs(tag_item_vec_path)
+ini_embeddings = [user_vecs, item_vecs, tag_user_vecs, tag_item_vecs]
+
+
 def train(data, test, m, gamma):
     """
     该函数主要作用： 定义网络；定义数据，定义损失函数和优化器，计算重要指标，开始训练（训练网络，计算在测试集上的指标）
@@ -61,7 +88,7 @@ def train(data, test, m, gamma):
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
     # model = RNNAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
-    model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
+    model = AttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings).cuda()
     # model = TagAttentionPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
