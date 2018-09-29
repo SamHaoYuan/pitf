@@ -13,8 +13,8 @@ import torch.optim as optim
 import datetime
 
 # 在1:1 正例负例采样的情况下，测试movielens数据集
-# train_data_path = 'data/movielens/all_id_core3_train'
-# test_data_path = 'data/movielens/all_id_core3_test'
+train_data_path = 'data/movielens/all_id_core3_train'
+test_data_path = 'data/movielens/all_id_core3_test'
 # ini_time = 1135429431000
 
 # train_data_path = 'data/movielens/all_id_core1_train'
@@ -29,8 +29,8 @@ import datetime
 # train_data_path = 'data/movielens/all_id_core3_train'
 # test_data_path = 'data/movielens/all_id_core3_test'
 
-train_data_path = 'data/delicious/all_id_core3_train'
-test_data_path = 'data/delicious/all_id_core3_test'
+# train_data_path = 'data/delicious/all_id_core3_train'
+# test_data_path = 'data/delicious/all_id_core3_test'
 
 movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
 movielens = movielens_all[:, 0:-1].astype(int)
@@ -47,15 +47,15 @@ def train(data, test):
     learnRate = 0.05
     lam = 0.00005
     dim = 64
-    iter_ = 500
+    iter_ = 100
     init_st = 0.01
     batch_size = 100
     n = 1000
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
-    model = SinglePITF(num_user, num_item, num_tag, dim, init_st).cuda()
-    torch.save(model.state_dict(), 'initial_params')
+    model = SinglePITF(int(num_user), int(num_item), int(num_tag), dim, init_st).cuda()
+    # torch.save(model.state_dict(), 'initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
     opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
@@ -114,7 +114,7 @@ def train(data, test):
         print("best result: " + str(best_result))
         print("==================================")
     # torch.save(model, "net.pkl")
-    torch.save(best_result_state, "net_params.pkl")
+    # torch.save(best_result_state, "net_params.pkl")
 
 
 train(movielens, movielens_test)
