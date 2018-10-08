@@ -568,10 +568,10 @@ class AttentionPITF(nn.Module):
         self._init_weight(init_st, init_embedding)
         
     def _init_weight(self, init_st, init_embedding):
-        self.userVecs.weight = init_embedding[0]
-        self.itemVecs.weight = init_embedding[1]
-        self.tagUserVecs.weight[1:] = init_embedding[2]
-        self.tagItemVecs.weight[1:] = init_embedding[3]
+        self.userVecs.weight.data = init_embedding[0]
+        self.itemVecs.weight.data = init_embedding[1]
+        self.tagUserVecs.weight.data[1:] = init_embedding[2]
+        self.tagItemVecs.weight.data[1:] = init_embedding[3]
         # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
         # self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
         # self.tagUserVecs.weight = nn.init.normal(self.tagUserVecs.weight, 0, init_st)
