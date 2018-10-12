@@ -13,8 +13,8 @@ import torch.optim as optim
 import datetime
 
 # 在1:100正例负例采样的情况下，测试movielens数据集
-# train_data_path = 'data/movielens/all_id_core3_train'
-# test_data_path = 'data/movielens/all_id_core3_test'
+train_data_path = 'data/movielens/all_id_core3_train'
+test_data_path = 'data/movielens/all_id_core3_test'
 # ini_time = 1135429431000
 
 # train_data_path = 'data/movielens/all_id_core1_train'
@@ -29,8 +29,8 @@ import datetime
 # train_data_path = 'data/movielens/all_id_core3_train'
 # test_data_path = 'data/movielens/all_id_core3_test'
 
-train_data_path = 'data/delicious/all_id_core3_train'
-test_data_path = 'data/delicious/all_id_core3_test'
+# train_data_path = 'data/delicious/all_id_core3_train'
+# test_data_path = 'data/delicious/all_id_core3_test'
 
 movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
 ini_time = int(movielens_all[:, 3].min())
@@ -41,10 +41,10 @@ movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test_all[:, -1] = (movielens_test_all[:, -1] - ini_time) / (24*3600*1000)
 movielens_test = movielens_test_all.astype(int)
 
-user_vecs_path = 'PreVecs/movielens/UserVecs'
-item_vecs_path = 'PreVecs/movielens/ItemVecs'
-tag_user_vec_path = 'PreVecs/movielens/UserTagVecs'
-tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs'
+user_vecs_path = 'PreVecs/movielens/UserVecs.txt'
+item_vecs_path = 'PreVecs/movielens/ItemVecs.txt'
+tag_user_vec_path = 'PreVecs/movielens/UserTagVecs.txt'
+tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs.txt'
 
 
 def handle_pre_vecs(file_path):
@@ -58,7 +58,7 @@ def handle_pre_vecs(file_path):
     pre_vecs[:, 0] = a
     pre_vecs[:, -1] = b  
     pre_vecs = pre_vecs.astype(float)
-    return pre_vecs
+    return torch.FloatTensor(pre_vecs)
 
 
 user_vecs = handle_pre_vecs(user_vecs_path)
@@ -75,7 +75,7 @@ def train(data, test, m, gamma):
     
     :return:
     """
-    learnRate = 0.01
+    learnRate = 0.001
     lam = 0.00005
     dim = 64
     iter_ = 100

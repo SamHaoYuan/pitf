@@ -75,7 +75,7 @@ class NeuralPITF(nn.Module):
             self.embedding.tagItemVecs.weight.t())
         return y.topk(k)[1]  # 按降序进行排列
 
-
+    
 class PITF_Loss(nn.Module):
     """
     定义PITF的loss function
@@ -375,7 +375,7 @@ class SinglePITF_Loss(nn.Module):
         print("Use the BPR for Optimization")
 
     def forward(self, r):
-        return t.sum(-t.log(t.sigmoid(r)))
+        return t.sum(-t.log(t.sigmoid(r)))# /len(r)
 
 
 class TransPITF(nn.Module):
@@ -451,20 +451,27 @@ class TimeAttentionPITF(nn.Module):
 
     出于加快训练的目的，应当思考如何进行向量化运算
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings):
         super(TimeAttentionPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
         self.tagUserVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.tagItemVecs = nn.Embedding(numTag, k, padding_idx=0)
+        # self.attentionMLP = nn.Linear(k, k)
+        self.user_tag_map = nn.Linear(4*k, k)
+        self.relu = nn.ReLU()
         self.m = m
         self.k = k
         self.gamma = gamma
-        self._init_weight(init_st)
+        self._init_weight(init_st, init_embeddings)
 
-    def _init_weight(self, init_st):
-        self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
-        self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
+    def _init_weight(self, init_st, init_embedding):
+        # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
+        # self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
+        self.userVecs.weight.data = init_embedding[0]
+        self.itemVecs.weight.data = init_embedding[1]
+        self.tagUserVecs.weight.data[1:] = init_embedding[2]
+        self.tagItemVecs.weight.data[1:] = init_embedding[3]
 
     def forward(self, x):
         """
@@ -489,7 +496,10 @@ class TimeAttentionPITF(nn.Module):
         tag_memory_vecs = self.tagUserVecs(tag_memory_ids)
 
         h = self.TimeAttention(tag_memory_vecs, time_memory, timestamp)
-        mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
+        add_vecs = user_vecs - h
+        mul_vecs = user_vecs * h
+        # mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
+        mix_user_vecs = self.relu(self.user_tag_map(t.cat((user_vecs, h, add_vecs, mul_vecs), 1)))
         r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
                 t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs*neg_tag_item_vec, dim=1))
         return r
@@ -542,7 +552,10 @@ class TimeAttentionPITF(nn.Module):
         item_vec = self.itemVecs(item_vec_ids)
         h_vecs = self.tagUserVecs(tag_memory_ids)
         h = self.TimeAttention(h_vecs, time_memory, timestamp)
-        mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
+        add_vec = user_vec - h
+        mul_vec = user_vec * h
+        # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
+        mix_user_vec = self.relu(self.user_tag_map(t.cat((user_vec, h, add_vec, mul_vec), 1)))
         y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
         return y.topk(k)[1]  # 按降序进行排列
 
@@ -560,11 +573,12 @@ class AttentionPITF(nn.Module):
         self.tagUserVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.tagItemVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.attentionMLP = nn.Linear(k, k)
-        self.user_tag_map = nn.Linear(2*k, k)
+        self.user_tag_map = nn.Linear(4*k, k)
         self.relu = nn.ReLU()
         self.m = m
         self.k = k
         self.gamma = gamma
+        self.dropout = nn.Dropout(0.3)
         self._init_weight(init_st, init_embedding)
         
     def _init_weight(self, init_st, init_embedding):
@@ -590,17 +604,20 @@ class AttentionPITF(nn.Module):
         neg_tag_vec_ids = x[:, 3]
         history_ids = x[:, -self.m:]
 
-        user_vecs = self.userVecs(user_vec_ids)
-        item_vecs = self.itemVecs(item_vec_ids)
-        user_tag_vecs = self.tagUserVecs(tag_vec_ids)
-        item_tag_vecs = self.tagItemVecs(tag_vec_ids)
-        neg_tag_user_vec = self.tagUserVecs(neg_tag_vec_ids)
-        neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
-        tag_history_vecs = self.tagUserVecs(history_ids)
-
+        user_vecs = self.dropout(self.userVecs(user_vec_ids))
+        item_vecs = self.dropout(self.itemVecs(item_vec_ids))
+        user_tag_vecs = self.dropout(self.tagUserVecs(tag_vec_ids))
+        item_tag_vecs = self.dropout(self.tagItemVecs(tag_vec_ids))
+        neg_tag_user_vec = self.dropout(self.tagUserVecs(neg_tag_vec_ids))
+        neg_tag_item_vec = self.dropout(self.tagItemVecs(neg_tag_vec_ids))
+        tag_history_vecs = self.dropout(self.tagUserVecs(history_ids))
         h = self.attention(user_vecs, tag_history_vecs)  # batch * k
         # mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
-        mix_user_vecs = self.user_tag_map(t.cat((user_vecs, h), 1))
+        add_vec = user_vecs - h
+        mul_vec = user_vecs * h
+        # mix_user_vecs = self.user_tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1))
+        mix_user_vecs = self.relu(self.user_tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1)))
+        # mix_user_vecs = self.relu(self.user_tag_map(t.cat((user_vecs, h), 1)))
         mix_user_vecs = mix_user_vecs.unsqueeze(1)
         user_tag_vecs = user_tag_vecs.unsqueeze(2)
         item_vecs = item_vecs.unsqueeze(1)
@@ -645,12 +662,17 @@ class AttentionPITF(nn.Module):
         item_vec_ids = x[:, 1]
         tag_memory_ids = x[:, -self.m:]
 
-        user_vec = self.userVecs(user_vec_ids)
-        item_vec = self.itemVecs(item_vec_ids)
-        h_vecs = self.tagUserVecs(tag_memory_ids)
+        user_vec = self.dropout(self.userVecs(user_vec_ids))
+        item_vec = self.dropout(self.itemVecs(item_vec_ids))
+        h_vecs = self.dropout(self.tagUserVecs(tag_memory_ids))
         h = self.attention(user_vec, h_vecs)
         # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
-        mix_user_vec = self.user_tag_map(t.cat((user_vec, h), 1))
+        # mix_user_vec = self.user_tag_map(t.cat((user_vec, h), 1))
+        # mix_user_vec = self.relu(self.user_tag_map(t.cat((user_vec, h), 1)))
+        add_vec = user_vec - h
+        mul_vec = user_vec * h
+        # mix_user_vec = self.user_tag_map(t.cat((user_vec, h, add_vec, mul_vec), 1))
+        mix_user_vec = self.relu(self.user_tag_map(t.cat((user_vec, h, add_vec, mul_vec), 1)))
         y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
 
         return y.topk(k)[1]  # 按降序进行排列
@@ -663,8 +685,8 @@ class RNNAttentionPITF(AttentionPITF):
 
     """
 
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
-        super(RNNAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma)
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embedding):
+        super(RNNAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma, init_embedding)
         self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.5)
         self.gru = nn.GRU(k,k,batch_first=True, dropout=0.5)
 
@@ -693,7 +715,13 @@ class RNNAttentionPITF(AttentionPITF):
         out, out_final = self.gru(tag_history_vecs)
         
         h = self.attention(user_vecs, out)  # batch * k
-        mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
+        # mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
+        add_vec = user_vecs - h
+        mul_vec = user_vecs * h
+        # mix_user_vecs = self.user_tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1))
+        mix_user_vecs = self.relu(self.user_tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1)))
+        # mix_user_vecs = self.relu(self.user_tag_map(t.cat((user_vecs, h), 1)))
+        # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
         r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
                 t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
@@ -711,13 +739,46 @@ class RNNAttentionPITF(AttentionPITF):
         # h_u_vec_ = self.relu(self.attentionMLP(u_vec))
         # u_vec_ = h_u_vec_.unsqueeze(2)
         # alpha = nn.functional.softmax(t.bmm(h_vecs, u_vec_).squeeze(2), 1)
-        u_vec_ = u_vec.unsqueeze(2)        
-        tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        u_vec_ = u_vec.unsqueeze(2)
+        tag_h_vecs = h_vecs
+        # tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
         alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
         
         alpha = alpha.unsqueeze(1)
         h = t.bmm(alpha, h_vecs)
         return h.squeeze(1)
+    
+    def predict_top_k(self, x, k=5):
+        """
+        给定User 和 item  记忆序列，根据模型返回前k个tag
+        输入sample:[u,i,m_1,m_2....m_j]
+        :param u:
+        :param i:
+        :param k:
+        :return:
+        """
+        user_vec_ids = x[:, 0]
+        item_vec_ids = x[:, 1]
+        tag_memory_ids = x[:, -self.m:]
+
+        user_vec = self.userVecs(user_vec_ids)
+        item_vec = self.itemVecs(item_vec_ids)
+        h_vecs = self.tagUserVecs(tag_memory_ids)
+        # h = self.attention(user_vec, h_vecs)
+        out, out_final = self.gru(h_vecs)
+        h = self.attention(user_vec, out)  # batch * k
+        # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
+        # mix_user_vec = self.user_tag_map(t.cat((user_vec, h), 1))
+        # mix_user_vec = self.relu(self.user_tag_map(t.cat((user_vec, h), 1)))
+        
+        add_vec = user_vec - h
+        mul_vec = user_vec * h
+        mix_user_vec = self.relu(self.user_tag_map(t.cat((user_vec, h, add_vec, mul_vec), 1)))
+        
+        y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
+
+        return y.topk(k)[1]  # 按降序进行排列
+
 
 
 class TagAttentionPITF(AttentionPITF):
@@ -727,9 +788,11 @@ class TagAttentionPITF(AttentionPITF):
 
     """
 
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma):
-        super(TagAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma)
-        self.tag_map = nn.Linear(2*k, k)
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings):
+        super(TagAttentionPITF, self).__init__(numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings)
+        self.tag_map = nn.Linear(4*k, k)
+        self.lstm = nn.LSTM(k, k, batch_first=True, dropout=0.5)
+        self.gru = nn.GRU(k,k,batch_first=True, dropout=0.5)
 
     def forward(self, x):
         """
@@ -751,15 +814,24 @@ class TagAttentionPITF(AttentionPITF):
         neg_tag_user_vec = self.tagUserVecs(neg_tag_vec_ids)
         neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
         tag_history_vecs = self.tagUserVecs(history_ids)
-
-        h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
-        h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
+        
+        out, out_final = self.gru(tag_history_vecs)
+        # out, out_final = self.gru(tag_history_vecs, user_vecs)
+        h = self.attention(user_tag_vecs, out) # 注意该方法中，attention不使用一层Map
+        h_neg = self.attention(user_tag_vecs, out)
+        
+        # h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
+        # h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
         # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
         # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
         # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
         #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
-        user_tag_vecs_ = self.tag_map(t.cat((user_tag_vecs, h), 1))
-        neg_tag_user_vecs_ = self.tag_map(t.cat((neg_tag_user_vec, h_neg), 1))
+        add_vec = user_tag_vecs - h
+        mul_vec = user_tag_vecs * h
+        user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
+        add_vec = neg_tag_user_vec - h_neg
+        mul_vec = neg_tag_user_vec * h_neg
+        neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg,add_vec, mul_vec), 1)))
         r = t.sum(user_vecs * user_tag_vecs_, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
                 t.sum(user_vecs * neg_tag_user_vecs_, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
@@ -775,7 +847,8 @@ class TagAttentionPITF(AttentionPITF):
         """
         # batch_size = u_vec.size()[0]
         u_vec_ = u_vec.unsqueeze(2)
-        tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        tag_h_vecs = h_vecs
+        # tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
         alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
         alpha = alpha.unsqueeze(1)
         h = t.bmm(alpha, h_vecs)
@@ -803,13 +876,21 @@ class TagAttentionPITF(AttentionPITF):
         item_vec = self.itemVecs(item_vec_ids).squeeze(1)
         h_vecs = self.tagUserVecs(tag_memory_ids)
         # h_vecs = h_vecs.repeat(self.numTag, 1)
-        h = self.attention(self.tagUserVecs.weight, h_vecs)
+        
+        out, out_final = self.gru(h_vecs)
+        # out, out_final = self.gru(tag_history_vecs, user_vecs)
+        h = self.attention(self.tagUserVecs.weight, out) # 注意该方法中，attention不使用一层Map
+        
+        # h = self.attention(self.tagUserVecs.weight, h_vecs)
+        
+        add_vec = self.tagUserVecs.weight - h
+        mul_vec = self.tagUserVecs.weight * h
+        user_tag_vecs = self.relu(self.tag_map(t.cat((self.tagUserVecs.weight, h, add_vec, mul_vec), 1)))  # numTag * k
         # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
-        user_tag_vecs = self.tag_map(t.cat((self.tagUserVecs.weight, h), 1))  # numTag * k
         #  print(mix_user_vec.size())
         # y = t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
         #     1), self.tagItemVecs.weight.unsqueeze(2))
         y = t.bmm(user_vec.unsqueeze(1), user_tag_vecs.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(1),
                                                                              self.tagItemVecs.weight.unsqueeze(2))
         y = t.squeeze(y)
-        return y.topk(k)  # 按降序进行排列
+        return y.topk(k)[1]  # 按降序进行排列
