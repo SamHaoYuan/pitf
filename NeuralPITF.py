@@ -99,10 +99,31 @@ class DataSet:
         self.trainUserTagSet, self.validaUserTagSet = dict(), dict()  # 一个用户使用过哪些tag
         self.trainItemTagSet, self.validaItemTagSet = dict(), dict()  # 一个Item被打过哪些tag
         self.userTimeList, self.validaUserTimeList = dict(), dict()  # 按顺序存储每个用户的 timestamp
+        self.userTagTimeList = list()  # 用处用户使用tag的时间戳列表
         self.userShortMemory = dict()  # 记录预测用户历史序列
         self.data = data
         self.validation = validation
         self.is_timestamp = is_timestamp
+        self.predictUserTagWeight = list()  # 预测时的user-tag 的权重值
+        self.itemTagWeight = list()  # 根据 most popular 存储所有item-tag的权重
+        self.userTagTrainWeight = list()
+        """
+        tao(u, tag, time) = initialTao（初始强度值）+ 该时间点之前的行为对当前行为的影响tao_star
+        这个值是递归计算的tao_star
+        """
+        self.trainUserTagTimeTaoList = list()
+        """
+        sum_tao(u,tag,time) 归一化tao(u, tag, time)的分母
+        """
+        self.tempUserTimeSum = list()
+        # 部分可调节的超参数
+        self.d = 0.1
+        self.base = 0
+        self.userTagWeightNum = 0
+        self.userTagWeightIterNum = 0
+        self.initialTao = 1
+        self.timeUnit = 3600000.0 * 24
+
         self._init_data() if not is_timestamp else self._init_timestamp_data()
 
     def _init_data(self):
@@ -143,8 +164,28 @@ class DataSet:
         将user-item-tag按照时间进行排序，时间戳需要处理为天
         初始化数据序列，注意一个timestamp可能有多个tag
         因为对于序列，不足长度的要采取补0的措施，因此所有tag_id需要+1
+
+        2018.10.16
+        权重的计算：
+        item-tag 是根据Most popular全局共享，并且并不随时间进行变化，因此只需要一个即可，正例负例读出即可
+        user-tag： 初始化的时候，可以直接计算得出训练集所有正例在每个时间点的tag，负例需要用当前时间进行重新计算
+                   对于测试集，所有user-tag的权重也可以事先计算好
         :return:
         """
+        num_user, num_item, num_tag = self.calc_number_of_dimensions()
+        item_tag_count_list = list()
+        user_time_list = list()
+
+        for u in range(num_user):
+            self.userTagTimeList.append(dict())
+            self.predictUserTagWeight.append(dict())
+            self.userTagTrainWeight.append(dict())
+            self.trainUserTagTimeTaoList.append(dict())
+            self.tempUserTimeSum.append(dict())
+            user_time_list.append(0)
+        for i in range(num_item):
+            self.itemTagWeight.append(dict())
+            item_tag_count_list.append(dict())
         for u, i, tag, time in self.data:
             tag = tag+1
             if u not in self.trainTagSet.keys():
@@ -159,9 +200,16 @@ class DataSet:
             if u not in self.userTimeList.keys():
                 self.userTimeList[u] = list()
                 # self.userShortMemory[u] = np.zeros(m)
+            if tag not in item_tag_count_list[i].keys():
+                item_tag_count_list[i][tag] = 0
+            if tag not in self.userTagTimeList[u].keys():
+                self.userTagTimeList[u][tag] = list()
+            self.userTagTimeList[u][tag].append(time)
             self.userTimeList[u].append((i, tag, time))
             self.trainUserTagSet[u].add(tag)
             self.trainItemTagSet[i].add(tag)
+            self.userTagTrainWeight[u][tag] = dict()
+            item_tag_count_list[i][tag] += 1
         if self.validation is not None:
             for u, i, tag, time in self.validation:
                 tag = tag+1
@@ -180,6 +228,38 @@ class DataSet:
                     self.validaItemTagSet[i] = set()
                 self.validaUserTagSet[u].add(tag)
                 self.validaItemTagSet[i].add(tag)
+                # 找到测试集中，用户打标签行为最晚的时间作为预测时间（存疑：为什么不直接用这次行为的时间？）
+                user_time_list[u] = time if time > user_time_list[u] else user_time_list[u]
+        self.cal_weights(num_user, num_item, num_tag, user_time_list)
+
+    def cal_pre_user_tag_weights(self, num_user, user_time_list):
+        """
+        计算预测时的 user_tag 权重
+        :return:
+        """
+        # 对user在测试集中不同时间点使用的不同tag的时间权重进行归一化
+        for u in range(num_user):
+            normalize = 0
+            predict_time = user_time_list[u]
+            tags_time = self.userTagTimeList[u]
+            for tag in tags_time.keys():
+                temp_tags_time = tags_time[tag]
+                temp_tags_time.sort()
+                first_time = temp_tags_time[0]
+                if tag not in self.trainUserTagTimeTaoList[u].keys():
+                    self.trainUserTagTimeTaoList[u][tag] = dict()
+                self.trainUserTagTimeTaoList[u][tag][first_time] = 0
+                """
+                对应 tao(u,tag,time) = initialTao + tao_star(u, tag, time)中的第二项
+                对于第一个时间点，由于之前没有其他事件，所以tao_star = 0
+                """
+                tao_star = 0
+                # 从列表的第二项开始计算到最后一项：
+                for index in range(1, len(temp_tags_time)):
+                    cur_time = temp_tags_time[index]
+                    previous_time = temp_tags_time[index-1]
+                    tao_star = (1+tao_star) * np.exp()
+
 
     def calc_number_of_dimensions(self):
         """
@@ -200,7 +280,7 @@ class DataSet:
                 if u > u_max: u_max = u
                 if i > i_max: i_max = i
                 if tag > t_max: t_max = tag
-            return u_max + 1, i_max + 1, t_max + 2
+            return u_max + 1, i_max + 1, t_max + 1
         else:
             for u, i, tag, time in self.data:
                 if u > u_max: u_max = u
@@ -250,7 +330,7 @@ class DataSet:
                 all_data.append(one_sample)
         return np.array(all_data)
 
-    def get_sequential(self, num_tag, m=5, num=10):
+    def get_sequential(self, num_tag, m=5, num=10, weight=False):
         """
         将输入数据中的每个user，按照时间顺序进行排序以后，返回m长度的记忆
         原始数据中，必须带有时间戳
@@ -262,7 +342,7 @@ class DataSet:
         seq_data = []
         for u in self.userTimeList.keys():
             # 每一个user，处理为tag,time列表，可以根据实际情况计算权重
-            user_seqs = np.array(self.userTimeList[u]) # num * 3
+            user_seqs = np.array(self.userTimeList[u])  # num * 3
             order = user_seqs[:, 2].argsort()
             user_seqs = user_seqs[order, :]
             for i in range(len(user_seqs)):
@@ -282,8 +362,17 @@ class DataSet:
                 while j < num:
                     j += 1
                     pairwise_sample = self.draw_negative_sample(num_tag, [u, item, tag], True)
+                    neg_t = pairwise_sample[3]
                     # seq_data.append([u, item, tag, neg_t, timestamp, tag_memory, timestamp_memory])
-                    seq_data.append(pairwise_sample+list(tag_memory) + [timestamp] + list(timestamp_memory))
+                    if weight:
+                        user_tag_weight = self.userTagTrainWeight[u][tag][timestamp]
+                        item_tag_weight = self.get_item_weight(item, tag)
+                        user_neg_tag_weight = self.get_user_weight(u, neg_t, timestamp)
+                        item_neg_tag_weight = self.get_item_weight(item, neg_t)
+                        seq_data.append(pairwise_sample + [user_tag_weight, item_tag_weight, user_neg_tag_weight,
+                                                           item_neg_tag_weight] + list(tag_memory) + [timestamp])
+                    else:
+                        seq_data.append(pairwise_sample + list(tag_memory) + [timestamp] + list(timestamp_memory))
             self.userShortMemory[u] = np.zeros(2*m)
             if len(self.userTimeList[u]) > m:
                 self.userShortMemory[u][0:m] = user_seqs[-m:, 1]
@@ -310,6 +399,12 @@ class DataSet:
         :return:
         """
         return
+
+    def get_weight_sequential(self, ):
+        """
+        原始数据中，必须带有时间戳，用以计算当前数据的weight
+        :return:
+        """
 
 
 class SinglePITF(nn.Module):
@@ -796,7 +891,6 @@ class RNNAttentionPITF(AttentionPITF):
         return y.topk(k)[1]  # 按降序进行排列
 
 
-
 class TagAttentionPITF(AttentionPITF):
     """
     直接基于attention机制的PITF, attention tag层面上进行attention
@@ -925,7 +1019,7 @@ class AttentionTAPITF(nn.Module):
     我们把权重的计算放在数据预处理这一块，将权重作为输入数据，直接传入模型
     由于训练数据的权重可以由JAVA代码直接计算，那么我们数据预处理需要计算的内容仅仅是每次所生成负例的权重
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights):
         super(AttentionTAPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
@@ -937,8 +1031,8 @@ class AttentionTAPITF(nn.Module):
         self.m = m
         self.k = k
         self.gamma = gamma
-        self.trainUserTagWeight = list()
-        self.itemTagPrefList = list()
+        self.user_weights = user_weights  # numTag * 1
+        self.item_weights = item_weights  # numTag * 1
         self._init_weight(init_st, init_embeddings)
 
     def _init_weight(self, init_st, init_embedding):
@@ -951,87 +1045,105 @@ class AttentionTAPITF(nn.Module):
 
     def forward(self, x):
         """
-        因为时间用于计算权重，所以首先尝试直接使用attention:
-        一条sample为 [user, item, tag, ne_tag, m_1,m_2,m_3,...,w_t, w_i,w_neg_t, w_neg_i]
-        :param x: m 个 [user, item, tag] 组成的 sample
+        首先，使用tag与tag_history进行attention，组合成新的tag embedding
+        还可以user与attention之后的h组合为新的user embedding或：
+        [u,i,t,neg_t,user_weight, item_weight, m_1,m_2,m_3...]
+        :param x:
         :return:
         """
         user_vec_ids = x[:, 0]
         item_vec_ids = x[:, 1]
         tag_vec_ids = x[:, 2]
         neg_tag_vec_ids = x[:, 3]
-        # timestamp = x[:, 4]
-        tag_memory_ids = x[:, 4:4+self.m]
-        timestamp = x[:, 4+self.m]
-        time_memory = x[:, -self.m:]
+        user_weight = x[:, 4]
+        item_weight = x[:, 5]
+        history_ids = x[:, -self.m:]
+
         user_vecs = self.userVecs(user_vec_ids)
         item_vecs = self.itemVecs(item_vec_ids)
         user_tag_vecs = self.tagUserVecs(tag_vec_ids)
         item_tag_vecs = self.tagItemVecs(tag_vec_ids)
         neg_tag_user_vec = self.tagUserVecs(neg_tag_vec_ids)
         neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
-        tag_memory_vecs = self.tagUserVecs(tag_memory_ids)
+        tag_history_vecs = self.tagUserVecs(history_ids)
 
-        h = self.TimeAttention(tag_memory_vecs, time_memory, timestamp)
-        add_vecs = user_vecs - h
-        mul_vecs = user_vecs * h
-        # mix_user_vecs = (1-self.gamma) * user_vecs + self.gamma * h
-        mix_user_vecs = self.relu(self.user_tag_map(t.cat((user_vecs, h, add_vecs, mul_vecs), 1)))
-        r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
-                t.sum(mix_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs*neg_tag_item_vec, dim=1))
+        # out, out_final = self.gru(tag_history_vecs)
+        # out, out_final = self.gru(tag_history_vecs, user_vecs)
+        # h = self.attention(user_tag_vecs, out)  # 注意该方法中，attention不使用一层Map
+        # h_neg = self.attention(user_tag_vecs, out)
+
+        h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
+        h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
+        # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
+        # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
+        # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
+        #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+        add_vec = user_tag_vecs - h
+        mul_vec = user_tag_vecs * h
+        user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
+        add_vec = neg_tag_user_vec - h_neg
+        mul_vec = neg_tag_user_vec * h_neg
+        neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
+        r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight*t.sum(
+            item_vecs * item_tag_vecs, dim=1) - (user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
+                                                 item_weight*t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
 
-    def TimeAttention(self, history_vecs, timestamps, now_time):
+    def attention(self, u_vec, h_vecs):
         """
-
-        :param history_vecs: Tensor, (batch_size, m, 64)
-        :param timestamps: Tensor (batch_size, m) 记录每个tag的时间
-        :return: c 历史行为组合的向量(batch_size, 64)
+        这一层，我们可以尝试多种attention的方法：
+        方案1：query 为user， key为历史tag, value同样为历史tag，然后将user+tag组成为新的user embedding
+        方案2：query为user, key和value为tag进行一层MLP后的结果（从TransPITF的结果来看，进行MLP和激活后，或许可以得到一个好点的结果）
+        :param u_vec: （batch_size, k)
+        :param h_vecs (batch_size, m, k)
+        :return:
         """
-        # batch_size = len(history_vecs)
-        # c = np.zeros(self.k)
-        weight = self._cal_weight(timestamps, now_time)
-        weight = weight.unsqueeze(1)
-        c = t.bmm(weight, history_vecs)
-        return c.squeeze(1)
-
-    def _cal_weight(self, history_times, now_time):
-        """
-
-        :param history_times:
-        :param now_time:
-        :return: tensor, (batch_size, m)
-        """
-        # batch_size = len(now_time)
-        a = t.exp((-0.5*(now_time.unsqueeze(1) - history_times)).type(t.FloatTensor)).cuda()
-        # a = a.type(t.LongTensor).cuda()
-        sum_weight = t.sum(a, dim=1)
-        return a/sum_weight.view(len(sum_weight), 1)
+        # batch_size = u_vec.size()[0]
+        u_vec_ = u_vec.unsqueeze(2)
+        tag_h_vecs = h_vecs
+        # tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
+        alpha = alpha.unsqueeze(1)
+        h = t.bmm(alpha, h_vecs)
+        return h.squeeze(1)
 
     def predict_top_k(self, x, k=5):
         """
         给定User 和 item  记忆序列，根据模型返回前k个tag
-        输入sample:[u,i,m_1,m_2....m_j, t_1,t_2,t_3,...., t]
-        :param u:
-        :param i:
-        :param h_l
-        :param k:
+        输入sample:[u,i, user_weight, item_weight, m_1,m_2....m_j]
+
+        这里注意，测试用例的权重是所有的tag都需要计算，因为事先训练好，可以作为模型一个预训练的常量
         :return:
         """
+        numTag = len(self.tagItemVecs.weight)
         user_vec_ids = x[:, 0]
+        user_vec_ids = user_vec_ids.repeat(numTag, 1)
         item_vec_ids = x[:, 1]
-        # timestamp = x[:, 2]
-        tag_memory_ids = x[:, 2:2 + self.m]
-        timestamp = x[:, -1]
-        time_memory = x[:, -self.m-1:-1]
-
-        user_vec = self.userVecs(user_vec_ids)
-        item_vec = self.itemVecs(item_vec_ids)
+        item_vec_ids = item_vec_ids.repeat(numTag, 1)
+        tag_memory_ids = x[:, -self.m:]
+        tag_memory_ids = tag_memory_ids.repeat(numTag, 1)
+        user_vec = self.userVecs(user_vec_ids).squeeze(1)
+        # print(user_vec.size())
+        # user_vec = user_vec.repeat(self.numTag, 1)
+        item_vec = self.itemVecs(item_vec_ids).squeeze(1)
         h_vecs = self.tagUserVecs(tag_memory_ids)
-        h = self.TimeAttention(h_vecs, time_memory, timestamp)
-        add_vec = user_vec - h
-        mul_vec = user_vec * h
+        # h_vecs = h_vecs.repeat(self.numTag, 1)
+
+        # out, out_final = self.gru(h_vecs)
+        # out, out_final = self.gru(tag_history_vecs, user_vecs)
+        # h = self.attention(self.tagUserVecs.weight, out)  # 注意该方法中，attention不使用一层Map
+
+        h = self.attention(self.tagUserVecs.weight, h_vecs)
+
+        add_vec = self.tagUserVecs.weight - h
+        mul_vec = self.tagUserVecs.weight * h
+        user_tag_vecs = self.relu(self.tag_map(t.cat((self.tagUserVecs.weight, h, add_vec, mul_vec), 1)))  # numTag * k
         # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
-        mix_user_vec = self.relu(self.user_tag_map(t.cat((user_vec, h, add_vec, mul_vec), 1)))
-        y = mix_user_vec.mm(self.tagUserVecs.weight.t()) + item_vec.mm(self.tagItemVecs.weight.t())
+        #  print(mix_user_vec.size())
+        # y = t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
+        #     1), self.tagItemVecs.weight.unsqueeze(2))
+        user_tag = t.bmm(user_vec.unsqueeze(1), user_tag_vecs.unsqueeze(2))
+        item_tag = t.bmm(item_vec.unsqueeze(1), self.tagItemVecs.weight.unsqueeze(2))
+        y = self.user_weights * user_tag.squeeze(2) + self.item_weights * item_tag.squeeze(2)
+        y = t.squeeze(y)
         return y.topk(k)[1]  # 按降序进行排列
