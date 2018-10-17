@@ -101,6 +101,7 @@ class DataSet:
         self.userTimeList, self.validaUserTimeList = dict(), dict()  # 按顺序存储每个用户的 timestamp
         self.userTagTimeList = list()  # 用处用户使用tag的时间戳列表
         self.userShortMemory = dict()  # 记录预测用户历史序列
+        self.alphaUser = 1.2
         self.data = data
         self.validation = validation
         self.is_timestamp = is_timestamp
@@ -230,7 +231,9 @@ class DataSet:
                 self.validaItemTagSet[i].add(tag)
                 # 找到测试集中，用户打标签行为最晚的时间作为预测时间（存疑：为什么不直接用这次行为的时间？）
                 user_time_list[u] = time if time > user_time_list[u] else user_time_list[u]
-        self.cal_weights(num_user, num_item, num_tag, user_time_list)
+        self.cal_pre_user_tag_weights(num_user, user_time_list)  # 计算预测时的权重，同时计算训练集过程中的权重
+
+        self.cal_train_user_tag_weights(num_user, num_item, num_tag, user_time_list)  # 计算训练集中的user-tag权重，会用trainUserTagTimeList
 
     def cal_pre_user_tag_weights(self, num_user, user_time_list):
         """
@@ -258,8 +261,77 @@ class DataSet:
                 for index in range(1, len(temp_tags_time)):
                     cur_time = temp_tags_time[index]
                     previous_time = temp_tags_time[index-1]
-                    tao_star = (1+tao_star) * np.exp()
+                    tao_star = (1+tao_star) * np.exp(-self.d*(cur_time - previous_time)/self.timeUnit)
+                    self.trainUserTagTimeTaoList[u][tag][cur_time] = tao_star
+                """
+                 * 计算完递归的taoStar后，根据taoStar(lastTime)来计算tao(user,tag,predictTime)
+                 * 当测试集中的predictTime和训练集中的lastTime相等时，我们仍然计算
+                 * 结果为1+taoStar(lastTime)【加上了1这个常数值】,
+                 * tao(user,tag,predictTime) = taoStar(lastTime) + initialTao
+                """
+                last_time = temp_tags_time[-1]
+                predict_tao = (1+self.trainUserTagTimeTaoList[u][tag][last_time]) * np.exp(-self.d*(predict_time-last_time))
+                normalize += predict_tao
+                self.predictUserTagWeight[u][tag] = predict_tao
+            for tag in tags_time.keys():
+                value = 1 + np.log10(1+np.power(10, self.alphaUser)*self.predictUserTagWeight[u][tag]/normalize)
+                self.predictUserTagWeight[u][tag] = value
 
+    def cal_train_user_tag_weights(self, num_user, user_time_list):
+        """
+        计算训练集中, w_u,tag,time权重
+        会利用前面计算好的trainUserTagTimeTaoStarList， 同时需要计算tempUserTimeSum，用户在每个时间点的用于归一化的tao的和
+        对于用户行为中已经包含的时间点，直接取
+        :param num_user:
+        :param user_time_list:
+        :return:
+        """
+        for u in range(num_user):
+            tags_time = self.userTagTimeList[u]
+            for tag in tags_time.keys():
+                temp_tags_time = tags_time[tag]
+                temp_tags_time.sort()
+                for index in range(len(temp_tags_time)):
+                    temp_time = temp_tags_time[index]
+                    normalize = 0
+                    normalize += self.trainUserTagTimeTaoList[u][tag][temp_time] + self.initialTao
+
+                    # 再次遍历， 计算tao(u, tempTime)的和
+                    for tag_key in tags_time.keys():
+                        # 除去分子中的tag与其他tag对应的时间列表
+                        if tag_key != tag:
+                            each_time_list = tags_time[tag_key]
+                            binary_index = self.binary_search(each_time_list, temp_time)
+                            """
+                            为计算tao(u, tagKey, tempTime),先找出tempTime前离得最近的时间点的索引binary_index
+                            有三种情况：
+                            1. 当tempTime存在于eachTimeList中时，直接取trainUserTagTimeTaoStarList.get(user).get(tagKey)
+                            .get(tempTime)+initialTao即可
+                            2. 找到了tempTime之前的索引，按公式计算
+                            3. 找不到tempTime之前的索引，则tao值为0，无需累加normalizeSum
+                            tao(u, tagKey, tempTime)=initialTao + taoStar
+                            """
+                            self.userTimeList
+
+    def binary_search(self, time_list, timestamp):
+        """
+        二分查找找到key之前的最大的时间戳
+       *  在按时间排好序的用户的train时间序列上
+       *  1.若key不包含在list中，返回key之前最大的时间戳，若找不到则返回-1
+       * 2 .key本身就包含在list中，直接返回key在list中的索引
+        :param time_list:
+        :param timestamp:
+        :return:
+        """
+        low = 0
+        high = len(time_list) - 1
+        while low < high:
+            mid = int((low + high + 1)/2)
+            if time_list[mid] > timestamp:
+                high = mid - 1
+            else:
+                low = mid
+        return low if time_list[low] <= timestamp else -1
 
     def calc_number_of_dimensions(self):
         """
