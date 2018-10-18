@@ -102,6 +102,7 @@ class DataSet:
         self.userTagTimeList = list()  # 用处用户使用tag的时间戳列表
         self.userShortMemory = dict()  # 记录预测用户历史序列
         self.alphaUser = 1.2
+        self.alphaItem = 1.2
         self.data = data
         self.validation = validation
         self.is_timestamp = is_timestamp
@@ -232,8 +233,8 @@ class DataSet:
                 # 找到测试集中，用户打标签行为最晚的时间作为预测时间（存疑：为什么不直接用这次行为的时间？）
                 user_time_list[u] = time if time > user_time_list[u] else user_time_list[u]
         self.cal_pre_user_tag_weights(num_user, user_time_list)  # 计算预测时的权重，同时计算训练集过程中的权重
-
-        self.cal_train_user_tag_weights(num_user, num_item, num_tag, user_time_list)  # 计算训练集中的user-tag权重，会用trainUserTagTimeList
+        self.cal_train_user_tag_weights(num_user)  # 计算训练集中的user-tag权重，会用trainUserTagTimeList
+        self.cal_item_tag_weights(num_tag, item_tag_count_list)
 
     def cal_pre_user_tag_weights(self, num_user, user_time_list):
         """
@@ -277,7 +278,7 @@ class DataSet:
                 value = 1 + np.log10(1+np.power(10, self.alphaUser)*self.predictUserTagWeight[u][tag]/normalize)
                 self.predictUserTagWeight[u][tag] = value
 
-    def cal_train_user_tag_weights(self, num_user, user_time_list):
+    def cal_train_user_tag_weights(self, num_user):
         """
         计算训练集中, w_u,tag,time权重
         会利用前面计算好的trainUserTagTimeTaoStarList， 同时需要计算tempUserTimeSum，用户在每个时间点的用于归一化的tao的和
@@ -296,7 +297,7 @@ class DataSet:
                     normalize = 0
                     normalize += self.trainUserTagTimeTaoList[u][tag][temp_time] + self.initialTao
 
-                    # 再次遍历， 计算tao(u, tempTime)的和
+                    # 再次遍历， 计算tao(u, tempTime)的和（对于每一个tag行为，需要将这个时间之前所有行为全部计算进行归一化）
                     for tag_key in tags_time.keys():
                         # 除去分子中的tag与其他tag对应的时间列表
                         if tag_key != tag:
@@ -311,7 +312,33 @@ class DataSet:
                             3. 找不到tempTime之前的索引，则tao值为0，无需累加normalizeSum
                             tao(u, tagKey, tempTime)=initialTao + taoStar
                             """
-                            self.userTimeList
+                            if binary_index != -1:
+                                last_time = each_time_list[binary_index]
+                                if last_time == temp_time:
+                                    normalize += self.initialTao + self.trainUserTagTimeTaoList[u][tag_key][temp_time]
+                                else:
+                                    normalize += self.initialTao + np.exp(-self.d*(temp_time - last_time)/self.timeUnit)*(1+self.trainUserTagTimeTaoList[u][tag_key][last_time])
+                self.tempUserTimeSum[u][temp_time] = normalize
+                # if tag not in self.userTagTrainWeight[u].keys():
+                #     self.userTagTrainWeight[u][tag] = dict()
+                value = 0
+                if normalize == 0:
+                    value = 1
+                else:
+                    value = 1 + np.log10(1 + np.power(10, self.alphaUser) * ( self.trainUserTagTimeTaoList[u][tag]
+                                                                              [temp_time]+self.initialTao)/normalize)
+                self.userTagTrainWeight[u][tag][temp_time] = value
+
+    def cal_item_tag_weights(self, num_tag, item_tag_count_list):
+        for item in range(num_tag):
+            normalize = 0
+            temp_tags_count = item_tag_count_list[item]
+            for tag in temp_tags_count.keys():
+                count = temp_tags_count[tag]
+                normalize += count
+                self.itemTagWeight[item][tag] = count
+            for tag in temp_tags_count.keys():
+                self.itemTagWeight[item][tag] = 1 + np.log10(1+np.power(10, self.alphaUser) * self.itemTagWeight[item][tag]/normalize)
 
     def binary_search(self, time_list, timestamp):
         """
@@ -439,7 +466,7 @@ class DataSet:
                     if weight:
                         user_tag_weight = self.userTagTrainWeight[u][tag][timestamp]
                         item_tag_weight = self.get_item_weight(item, tag)
-                        user_neg_tag_weight = self.get_user_weight(u, neg_t, timestamp)
+                        user_neg_tag_weight = self.get_neg_user_weight(u, neg_t, timestamp)
                         item_neg_tag_weight = self.get_item_weight(item, neg_t)
                         seq_data.append(pairwise_sample + [user_tag_weight, item_tag_weight, user_neg_tag_weight,
                                                            item_neg_tag_weight] + list(tag_memory) + [timestamp])
@@ -456,27 +483,59 @@ class DataSet:
                 self.userShortMemory[u][2*m - length:] = user_seqs[:, 2]
         return np.array(seq_data)
 
-    def get_user_weight(self):
+    def get_neg_user_weight(self, u, tag, time):
         """
-        根据输入数据，使用指数衰减，计算所有user-tag的权重
-        数据结构的输入为（user, time) batch*2
-        对于正例，输出为
+        根据输入数据，使用指数衰减，计算user-tag负例的权重
         :return:
         """
-        return
+        weight = 0
+        normalize = 0
+        if tag in self.trainUserTagSet[u].keys():
+            temp_tags_time_list = self.userTagTimeList[u][tag]
+            binary_index = self.binary_search(temp_tags_time_list, time)
+            if binary_index != -1:
+                # time 是训练集中最小的时间戳时，tao为0
+                if self.tempUserTimeSum[u][tag] == 0:
+                    weight = 1
+                else:
+                    last_time = temp_tags_time_list[binary_index]
+                    if last_time == time:
+                        # 在用户使用负例的tag时间中包含time,则可以直接取出已经算好的weight
+                        weight = self.trainUserTagTimeTaoList[u][tag][time]
+                    else:
+                        # 在用户使用的负例tag时间序列中不包含time， time前最近的时间戳是lasttime
+                        weight = (np.exp(-self.d*(time - last_time)/self.timeUnit) * (1+self.trainUserTagTimeTaoList[u][tag][last_time]) + self.initialTao) / self.tempUserTimeSum[u][time]
+                        weight = 1 + np.log10(1+ np.power(10, self.alphaUser) * weight)
+            else:
+                weight = 1  # 用户在time之前没有用过tag,weight也为1
+        else:
+            weight = 1  # 用户在训练集中没有使用过tag，则权重为1
+        return weight
 
-    def get_item_weight(self):
+    def get_item_weight(self, i, tag):
         """
-        根据所有输入，计算most popular,作为item-tag权重
+        根据所有输入，计算most popular,作为item-tag权重, 注意，对于训练集中没有出现的tag，权重为1
         :return:
         """
-        return
+        item_weight = 1
+        if tag in self.itemTagWeight[i].keys():
+            item_weight = self.itemTagWeight[i][tag]
+        return item_weight
 
-    def get_weight_sequential(self, ):
+    def weight_to_vector(self, num_user, num_item, num_tag):
         """
-        原始数据中，必须带有时间戳，用以计算当前数据的weight
+        将predictUserTagWeight和itemTagWeight统一转为矩阵形式
         :return:
         """
+        pre_user_weight = np.ones((num_user, num_tag))
+        item_weight = np.ones((num_item, num_tag))
+        for u in range(num_user):
+            for tag in self.predictUserTagWeight[u].keys():
+                pre_user_weight[u][tag] = self.predictUserTagWeight[u][tag]
+        for i in range(num_item):
+            for tag in self.itemTagWeight[i].keys():
+                item_weight[i][tag] = self.itemTagWeight[i][tag]
+        return pre_user_weight, item_weight
 
 
 class SinglePITF(nn.Module):
@@ -703,7 +762,6 @@ class TimeAttentionPITF(nn.Module):
 
     def _cal_weight(self, history_times, now_time):
         """
-
         :param history_times:
         :param now_time:
         :return: tensor, (batch_size, m)
@@ -1119,7 +1177,7 @@ class AttentionTAPITF(nn.Module):
         """
         首先，使用tag与tag_history进行attention，组合成新的tag embedding
         还可以user与attention之后的h组合为新的user embedding或：
-        [u,i,t,neg_t,user_weight, item_weight, m_1,m_2,m_3...]
+        [u,i,t,neg_t,user_weight, item_weight, neg_user_weight, neg_item_weight, m_1,m_2,m_3...]
         :param x:
         :return:
         """
@@ -1129,8 +1187,11 @@ class AttentionTAPITF(nn.Module):
         neg_tag_vec_ids = x[:, 3]
         user_weight = x[:, 4]
         item_weight = x[:, 5]
+        neg_user_weight = x[:, 6]
+        neg_item_weight = x[:, 7]
         history_ids = x[:, -self.m:]
 
+        print(user_vec_ids)
         user_vecs = self.userVecs(user_vec_ids)
         item_vecs = self.itemVecs(item_vec_ids)
         user_tag_vecs = self.tagUserVecs(tag_vec_ids)
@@ -1157,8 +1218,8 @@ class AttentionTAPITF(nn.Module):
         mul_vec = neg_tag_user_vec * h_neg
         neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
         r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight*t.sum(
-            item_vecs * item_tag_vecs, dim=1) - (user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
-                                                 item_weight*t.sum(item_vecs * neg_tag_item_vec, dim=1))
+            item_vecs * item_tag_vecs, dim=1) - (neg_user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
+                                                 neg_item_weight*t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
 
     def attention(self, u_vec, h_vecs):
@@ -1185,12 +1246,16 @@ class AttentionTAPITF(nn.Module):
         输入sample:[u,i, user_weight, item_weight, m_1,m_2....m_j]
 
         这里注意，测试用例的权重是所有的tag都需要计算，因为事先训练好，可以作为模型一个预训练的常量
+        item_weight可以直接是Most_popluar
+        user_weight则
         :return:
         """
         numTag = len(self.tagItemVecs.weight)
         user_vec_ids = x[:, 0]
+        user_weight = self.user_weights[user_vec_ids]
         user_vec_ids = user_vec_ids.repeat(numTag, 1)
         item_vec_ids = x[:, 1]
+        item_weight = self.item_weights[item_vec_ids]
         item_vec_ids = item_vec_ids.repeat(numTag, 1)
         tag_memory_ids = x[:, -self.m:]
         tag_memory_ids = tag_memory_ids.repeat(numTag, 1)
@@ -1216,6 +1281,6 @@ class AttentionTAPITF(nn.Module):
         #     1), self.tagItemVecs.weight.unsqueeze(2))
         user_tag = t.bmm(user_vec.unsqueeze(1), user_tag_vecs.unsqueeze(2))
         item_tag = t.bmm(item_vec.unsqueeze(1), self.tagItemVecs.weight.unsqueeze(2))
-        y = self.user_weights * user_tag.squeeze(2) + self.item_weights * item_tag.squeeze(2)
+        y = user_weight * user_tag.squeeze(2) + item_weight * item_tag.squeeze(2)
         y = t.squeeze(y)
         return y.topk(k)[1]  # 按降序进行排列
