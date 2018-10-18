@@ -86,7 +86,7 @@ def train(data, test, m, gamma):
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
     predict_user_weight, item_weight = dataload.weight_to_vector(num_user, num_item, num_tag)
-    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight)
+    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight).cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
@@ -100,7 +100,7 @@ def train(data, test, m, gamma):
     for epoch in range(iter_):
         # file_ = open('AttentionTureParam.txt', 'a')
         all_data = []
-        all_data = dataload.get_sequential(num_tag, m, 100)
+        all_data = dataload.get_sequential(num_tag, m, 1, True)
         all_data = all_data[:, :8 + m]
         losses = []
         print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))

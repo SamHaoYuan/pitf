@@ -124,7 +124,7 @@ class DataSet:
         self.userTagWeightNum = 0
         self.userTagWeightIterNum = 0
         self.initialTao = 1
-        self.timeUnit = 3600000.0 * 24
+        self.timeUnit = 1
 
         self._init_data() if not is_timestamp else self._init_timestamp_data()
 
@@ -325,8 +325,7 @@ class DataSet:
                 if normalize == 0:
                     value = 1
                 else:
-                    value = 1 + np.log10(1 + np.power(10, self.alphaUser) * ( self.trainUserTagTimeTaoList[u][tag]
-                                                                              [temp_time]+self.initialTao)/normalize)
+                    value = 1 + np.log10(1 + np.power(10, self.alphaUser) * (self.trainUserTagTimeTaoList[u][tag][temp_time]+self.initialTao)/normalize)
                 self.userTagTrainWeight[u][tag][temp_time] = value
 
     def cal_item_tag_weights(self, num_tag, item_tag_count_list):
@@ -464,6 +463,7 @@ class DataSet:
                     neg_t = pairwise_sample[3]
                     # seq_data.append([u, item, tag, neg_t, timestamp, tag_memory, timestamp_memory])
                     if weight:
+                        print([u,tag,timestamp])
                         user_tag_weight = self.userTagTrainWeight[u][tag][timestamp]
                         item_tag_weight = self.get_item_weight(item, tag)
                         user_neg_tag_weight = self.get_neg_user_weight(u, neg_t, timestamp)
@@ -490,7 +490,7 @@ class DataSet:
         """
         weight = 0
         normalize = 0
-        if tag in self.trainUserTagSet[u].keys():
+        if tag in self.trainUserTagSet[u]:
             temp_tags_time_list = self.userTagTimeList[u][tag]
             binary_index = self.binary_search(temp_tags_time_list, time)
             if binary_index != -1:
@@ -1164,6 +1164,7 @@ class AttentionTAPITF(nn.Module):
         self.user_weights = user_weights  # numTag * 1
         self.item_weights = item_weights  # numTag * 1
         self._init_weight(init_st, init_embeddings)
+        self.tag_map = nn.Linear(4*k ,k)
 
     def _init_weight(self, init_st, init_embedding):
         # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
@@ -1189,9 +1190,12 @@ class AttentionTAPITF(nn.Module):
         item_weight = x[:, 5]
         neg_user_weight = x[:, 6]
         neg_item_weight = x[:, 7]
+        # user_weight = t.FloatTensor(user_weight).cuda()
+        # item_weight = t.FloatTensor(item_weight).cuda()
+        # neg_user_weight = t.FloatTensor(neg_user_weight).cuda()
+        # neg_item_weight = t.FloatTensor(neg_item_weight).cuda()
         history_ids = x[:, -self.m:]
 
-        print(user_vec_ids)
         user_vecs = self.userVecs(user_vec_ids)
         item_vecs = self.itemVecs(item_vec_ids)
         user_tag_vecs = self.tagUserVecs(tag_vec_ids)
@@ -1217,9 +1221,14 @@ class AttentionTAPITF(nn.Module):
         add_vec = neg_tag_user_vec - h_neg
         mul_vec = neg_tag_user_vec * h_neg
         neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
-        r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight*t.sum(
-            item_vecs * item_tag_vecs, dim=1) - (neg_user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
-                                                 neg_item_weight*t.sum(item_vecs * neg_tag_item_vec, dim=1))
+        w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs_, dim=1)
+        w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+        w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vecs_, dim=1)
+        w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+        r = w_u + w_i - (w_neg_u + w_neg_i)
+        # r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight * t.sum(
+        #     item_vecs * item_tag_vecs, dim=1) - (neg_user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
+        #                                         neg_item_weight * t.sum(item_vecs * neg_tag_item_vec, dim=1))
         return r
 
     def attention(self, u_vec, h_vecs):
@@ -1252,10 +1261,10 @@ class AttentionTAPITF(nn.Module):
         """
         numTag = len(self.tagItemVecs.weight)
         user_vec_ids = x[:, 0]
-        user_weight = self.user_weights[user_vec_ids]
+        user_weight = t.FloatTensor(self.user_weights[user_vec_ids]).cuda()
         user_vec_ids = user_vec_ids.repeat(numTag, 1)
         item_vec_ids = x[:, 1]
-        item_weight = self.item_weights[item_vec_ids]
+        item_weight = t.FloatTensor(self.item_weights[item_vec_ids]).cuda()
         item_vec_ids = item_vec_ids.repeat(numTag, 1)
         tag_memory_ids = x[:, -self.m:]
         tag_memory_ids = tag_memory_ids.repeat(numTag, 1)
@@ -1281,6 +1290,7 @@ class AttentionTAPITF(nn.Module):
         #     1), self.tagItemVecs.weight.unsqueeze(2))
         user_tag = t.bmm(user_vec.unsqueeze(1), user_tag_vecs.unsqueeze(2))
         item_tag = t.bmm(item_vec.unsqueeze(1), self.tagItemVecs.weight.unsqueeze(2))
-        y = user_weight * user_tag.squeeze(2) + item_weight * item_tag.squeeze(2)
-        y = t.squeeze(y)
+        y = user_weight * user_tag.squeeze() + item_weight * item_tag.squeeze()
+        # y = t.squeeze(y)
+        # print(y.topk(k))
         return y.topk(k)[1]  # 按降序进行排列
