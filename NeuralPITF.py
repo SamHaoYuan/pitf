@@ -318,15 +318,15 @@ class DataSet:
                                     normalize += self.initialTao + self.trainUserTagTimeTaoList[u][tag_key][temp_time]
                                 else:
                                     normalize += self.initialTao + np.exp(-self.d*(temp_time - last_time)/self.timeUnit)*(1+self.trainUserTagTimeTaoList[u][tag_key][last_time])
-                self.tempUserTimeSum[u][temp_time] = normalize
-                # if tag not in self.userTagTrainWeight[u].keys():
-                #     self.userTagTrainWeight[u][tag] = dict()
-                value = 0
-                if normalize == 0:
-                    value = 1
-                else:
-                    value = 1 + np.log10(1 + np.power(10, self.alphaUser) * (self.trainUserTagTimeTaoList[u][tag][temp_time]+self.initialTao)/normalize)
-                self.userTagTrainWeight[u][tag][temp_time] = value
+                    self.tempUserTimeSum[u][temp_time] = normalize
+                    # if tag not in self.userTagTrainWeight[u].keys():
+                    #     self.userTagTrainWeight[u][tag] = dict()
+                    value = 0
+                    if normalize == 0:
+                        value = 1
+                    else:
+                        value = 1 + np.log10(1 + np.power(10, self.alphaUser) * (self.trainUserTagTimeTaoList[u][tag][temp_time]+self.initialTao)/normalize)
+                    self.userTagTrainWeight[u][tag][temp_time] = value
 
     def cal_item_tag_weights(self, num_tag, item_tag_count_list):
         for item in range(num_tag):
@@ -463,7 +463,7 @@ class DataSet:
                     neg_t = pairwise_sample[3]
                     # seq_data.append([u, item, tag, neg_t, timestamp, tag_memory, timestamp_memory])
                     if weight:
-                        print([u,tag,timestamp])
+                        # print([u,tag,timestamp])
                         user_tag_weight = self.userTagTrainWeight[u][tag][timestamp]
                         item_tag_weight = self.get_item_weight(item, tag)
                         user_neg_tag_weight = self.get_neg_user_weight(u, neg_t, timestamp)
@@ -495,7 +495,7 @@ class DataSet:
             binary_index = self.binary_search(temp_tags_time_list, time)
             if binary_index != -1:
                 # time 是训练集中最小的时间戳时，tao为0
-                if self.tempUserTimeSum[u][tag] == 0:
+                if self.tempUserTimeSum[u][time] == 0:
                     weight = 1
                 else:
                     last_time = temp_tags_time_list[binary_index]
