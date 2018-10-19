@@ -119,12 +119,12 @@ class DataSet:
         """
         self.tempUserTimeSum = list()
         # 部分可调节的超参数
-        self.d = 0.1
+        self.d = 0.5
         self.base = 0
         self.userTagWeightNum = 0
         self.userTagWeightIterNum = 0
         self.initialTao = 1
-        self.timeUnit = 1
+        self.timeUnit = 24*3600*1000
 
         self._init_data() if not is_timestamp else self._init_timestamp_data()
 
@@ -271,7 +271,14 @@ class DataSet:
                  * tao(user,tag,predictTime) = taoStar(lastTime) + initialTao
                 """
                 last_time = temp_tags_time[-1]
-                predict_tao = (1+self.trainUserTagTimeTaoList[u][tag][last_time]) * np.exp(-self.d*(predict_time-last_time))
+                # try:
+                # print(-self.d*(predict_time-last_time)/self.timeUnit)
+                # print([u, tag, last_time, predict_time])
+                predict_tao = (1+self.trainUserTagTimeTaoList[u][tag][last_time]) * np.exp(-self.d*(predict_time-last_time)/self.timeUnit) + self.initialTao
+                # except RuntimeWarning as e:
+                #     print(-self.d*(predict_time-last_time)/self.timeUnit)
+                #     print([u, tag, last_time, predict_time])
+                #     raise
                 normalize += predict_tao
                 self.predictUserTagWeight[u][tag] = predict_tao
             for tag in tags_time.keys():
@@ -1149,7 +1156,7 @@ class AttentionTAPITF(nn.Module):
     我们把权重的计算放在数据预处理这一块，将权重作为输入数据，直接传入模型
     由于训练数据的权重可以由JAVA代码直接计算，那么我们数据预处理需要计算的内容仅仅是每次所生成负例的权重
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights, use_attention=True):
         super(AttentionTAPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
@@ -1165,6 +1172,7 @@ class AttentionTAPITF(nn.Module):
         self.item_weights = item_weights  # numTag * 1
         self._init_weight(init_st, init_embeddings)
         self.tag_map = nn.Linear(4*k ,k)
+        self.use_attention = use_attention
 
     def _init_weight(self, init_st, init_embedding):
         # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
@@ -1204,31 +1212,38 @@ class AttentionTAPITF(nn.Module):
         neg_tag_item_vec = self.tagItemVecs(neg_tag_vec_ids)
         tag_history_vecs = self.tagUserVecs(history_ids)
 
-        # out, out_final = self.gru(tag_history_vecs)
-        # out, out_final = self.gru(tag_history_vecs, user_vecs)
-        # h = self.attention(user_tag_vecs, out)  # 注意该方法中，attention不使用一层Map
-        # h_neg = self.attention(user_tag_vecs, out)
+        if self.use_attention:
+            # out, out_final = self.gru(tag_history_vecs)
+            # out, out_final = self.gru(tag_history_vecs, user_vecs)
+            # h = self.attention(user_tag_vecs, out)  # 注意该方法中，attention不使用一层Map
+            # h_neg = self.attention(user_tag_vecs, out)
 
-        h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
-        h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
-        # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
-        # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
-        # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
-        #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
-        add_vec = user_tag_vecs - h
-        mul_vec = user_tag_vecs * h
-        user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
-        add_vec = neg_tag_user_vec - h_neg
-        mul_vec = neg_tag_user_vec * h_neg
-        neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
-        w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs_, dim=1)
-        w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
-        w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vecs_, dim=1)
-        w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
-        r = w_u + w_i - (w_neg_u + w_neg_i)
+            h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
+            h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
+            # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
+            # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
+            # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
+            #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+            add_vec = user_tag_vecs - h
+            mul_vec = user_tag_vecs * h
+            user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
+            add_vec = neg_tag_user_vec - h_neg
+            mul_vec = neg_tag_user_vec * h_neg
+            neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
+            w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs_, dim=1)
+            w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+            w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vecs_, dim=1)
+            w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+            r = w_u + w_i - (w_neg_u + w_neg_i)
         # r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight * t.sum(
         #     item_vecs * item_tag_vecs, dim=1) - (neg_user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
         #                                         neg_item_weight * t.sum(item_vecs * neg_tag_item_vec, dim=1))
+        else:
+            w_u = user_weight.float() * t.sum(user_vecs*user_tag_vecs, dim=1)
+            w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+            w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vec, dim=1)
+            w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+            r = w_u+w_i - (w_neg_u + w_neg_i)
         return r
 
     def attention(self, u_vec, h_vecs):

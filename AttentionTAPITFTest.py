@@ -31,13 +31,15 @@ test_data_path = 'data/movielens/all_id_core3_test'
 # test_data_path = 'data/delicious/all_id_core3_test'
 
 movielens_all = np.genfromtxt(train_data_path, delimiter='\t', dtype=float)
-ini_time = int(movielens_all[:, 3].min())
-movielens_all[:, -1] = (movielens_all[:, -1] - ini_time) / (24 * 3600 * 1000)
-movielens = movielens_all.astype(int)
+# ini_time = int(movielens_all[:, 3].min())
+# movielens_all[:, -1] = (movielens_all[:, -1] - ini_time) / (24 * 3600 * 1000)
+movielens = movielens_all.astype('int64')
+# movielens = movielens_all
 
 movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
-movielens_test_all[:, -1] = (movielens_test_all[:, -1] - ini_time) / (24 * 3600 * 1000)
-movielens_test = movielens_test_all.astype(int)
+# movielens_test_all[:, -1] = (movielens_test_all[:, -1] - ini_time) / (24 * 3600 * 1000)
+movielens_test = movielens_test_all.astype('int64')
+# movielens_test = movielens_test_all
 
 user_vecs_path = 'PreVecs/movielens/UserVecs.txt'
 item_vecs_path = 'PreVecs/movielens/ItemVecs.txt'
@@ -81,7 +83,7 @@ def train(data, test, m, gamma):
     m = m
     gamma = gamma
     batch_size = 100
-    n = 100000
+    n = 1000
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
@@ -100,7 +102,7 @@ def train(data, test, m, gamma):
     for epoch in range(iter_):
         # file_ = open('AttentionTureParam.txt', 'a')
         all_data = []
-        all_data = dataload.get_sequential(num_tag, m, 1, True)
+        all_data = dataload.get_sequential(num_tag, m, 100, True)
         all_data = all_data[:, :8 + m]
         losses = []
         print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
