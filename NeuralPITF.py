@@ -1155,8 +1155,13 @@ class AttentionTAPITF(nn.Module):
         最流行的tag的时间序列权重
     我们把权重的计算放在数据预处理这一块，将权重作为输入数据，直接传入模型
     由于训练数据的权重可以由JAVA代码直接计算，那么我们数据预处理需要计算的内容仅仅是每次所生成负例的权重
+
+    我们将各种情况实现在一个类中，通过多余的参数进行控制：
+    1. 直接使用TAPITF
+    2. 实现user query 的attention (权重和映射都可以试一试，映射更加有说服力）
+    3. 实现tag query 的 attention
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights, use_attention=True):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights, use_attention=True, query_type = 'tag'):
         super(AttentionTAPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
@@ -1171,8 +1176,9 @@ class AttentionTAPITF(nn.Module):
         self.user_weights = user_weights  # numTag * 1
         self.item_weights = item_weights  # numTag * 1
         self._init_weight(init_st, init_embeddings)
-        self.tag_map = nn.Linear(4*k ,k)
-        self.use_attention = use_attention
+        self.tag_map = nn.Linear(4*k, k)
+        self.use_attention = use_attention  # 该参数控制是否使用 attention 机制
+        self.query_type = query_type  # 该参数控制 user 还是tag query（默认为tag)
 
     def _init_weight(self, init_st, init_embedding):
         # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
@@ -1217,24 +1223,35 @@ class AttentionTAPITF(nn.Module):
             # out, out_final = self.gru(tag_history_vecs, user_vecs)
             # h = self.attention(user_tag_vecs, out)  # 注意该方法中，attention不使用一层Map
             # h_neg = self.attention(user_tag_vecs, out)
+            if self.query_type == 'tag':
+                h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
+                h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
+                # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
+                # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
+                # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
+                #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
+                add_vec = user_tag_vecs - h
+                mul_vec = user_tag_vecs * h
+                user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
+                add_vec = neg_tag_user_vec - h_neg
+                mul_vec = neg_tag_user_vec * h_neg
+                neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
+                w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs_, dim=1)
+                w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+                w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vecs_, dim=1)
+                w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+                r = w_u + w_i - (w_neg_u + w_neg_i)
+            else:
+                h = self.attention(user_vecs, tag_history_vecs)
+                add_vec = user_vecs - h
+                mul_vec = user_vecs * h
+                user_vecs_ = self.relu(self.tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1)))
+                w_u = user_weight.float() * t.sum(user_vecs_ * user_tag_vecs, dim=1)
+                w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+                w_neg_u = neg_user_weight.float() * t.sum(user_vecs_ * neg_tag_user_vec, dim=1)
+                w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+                r = w_u + w_i - (w_neg_u + w_neg_i)
 
-            h = self.attention(user_tag_vecs, tag_history_vecs)  # batch * k
-            h_neg = self.attention(neg_tag_user_vec, tag_history_vecs)
-            # mix_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h
-            # mix_neg_user_vecs = (1 - self.gamma) * user_vecs + self.gamma * h_neg
-            # r = t.sum(mix_user_vecs * user_tag_vecs, dim=1) + t.sum(item_vecs * item_tag_vecs, dim=1) - (
-            #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
-            add_vec = user_tag_vecs - h
-            mul_vec = user_tag_vecs * h
-            user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
-            add_vec = neg_tag_user_vec - h_neg
-            mul_vec = neg_tag_user_vec * h_neg
-            neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
-            w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs_, dim=1)
-            w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
-            w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vecs_, dim=1)
-            w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
-            r = w_u + w_i - (w_neg_u + w_neg_i)
         # r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight * t.sum(
         #     item_vecs * item_tag_vecs, dim=1) - (neg_user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
         #                                         neg_item_weight * t.sum(item_vecs * neg_tag_item_vec, dim=1))
@@ -1289,16 +1306,25 @@ class AttentionTAPITF(nn.Module):
         item_vec = self.itemVecs(item_vec_ids).squeeze(1)
         h_vecs = self.tagUserVecs(tag_memory_ids)
         # h_vecs = h_vecs.repeat(self.numTag, 1)
+        user_tag_vecs = self.tagUserVecs.weight
+        if self.use_attention:
+            if self.query_type == 'tag':
+                # out, out_final = self.gru(h_vecs)
+                # out, out_final = self.gru(tag_history_vecs, user_vecs)
+                # h = self.attention(self.tagUserVecs.weight, out)  # 注意该方法中，attention不使用一层Map
 
-        # out, out_final = self.gru(h_vecs)
-        # out, out_final = self.gru(tag_history_vecs, user_vecs)
-        # h = self.attention(self.tagUserVecs.weight, out)  # 注意该方法中，attention不使用一层Map
+                h = self.attention(self.tagUserVecs.weight, h_vecs)
 
-        h = self.attention(self.tagUserVecs.weight, h_vecs)
+                add_vec = self.tagUserVecs.weight - h
+                mul_vec = self.tagUserVecs.weight * h
+                user_tag_vecs = self.relu(self.tag_map(t.cat((self.tagUserVecs.weight, h, add_vec, mul_vec), 1)))  # numTag * k
 
-        add_vec = self.tagUserVecs.weight - h
-        mul_vec = self.tagUserVecs.weight * h
-        user_tag_vecs = self.relu(self.tag_map(t.cat((self.tagUserVecs.weight, h, add_vec, mul_vec), 1)))  # numTag * k
+            else:
+                h = self.attention(user_vec, h_vecs)
+                add_vec = self.tagUserVecs.weight - h
+                mul_vec = self.tagUserVecs.weight * h
+                user_vec = self.relu(
+                    self.tag_map(t.cat((user_vec, h, add_vec, mul_vec), 1)))  # numTag * k
         # mix_user_vec = (1 - self.gamma) * user_vec + self.gamma * h
         #  print(mix_user_vec.size())
         # y = t.bmm(mix_user_vec.unsqueeze(1), self.tagUserVecs.weight.unsqueeze(2)) + t.bmm(item_vec.unsqueeze(
