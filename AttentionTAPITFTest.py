@@ -86,6 +86,8 @@ def dcg_score(y_pre, y_true, k):
     :return:
     """
     y_pre_score = np.zeros(k)
+    if len(y_pre) > 5:
+        y_pre = y_pre[:5]
     for i in range(len(y_pre)):
         pre_tag = y_pre[i]
         if pre_tag in y_true:
@@ -98,6 +100,8 @@ def dcg_score(y_pre, y_true, k):
 def ndcg_score(y_pre, y_true, k=5):
     dcg = dcg_score(y_pre, y_true, k)
     idcg = dcg_score(y_true, y_true, k)
+    # print(dcg)
+    # print(idcg)
     return dcg/idcg
 
 user_vecs = handle_pre_vecs(user_vecs_path)
@@ -184,6 +188,7 @@ def train(data, test, m, gamma):
                 recall = recall + float(number / tagsNum)
                 count += 1
                 mrr = mrr + mrr_rank_score(list(y_pre), list(tags))
+                # print(ndcg_score(np.array(y_pre), list(tags)))
                 ndcg = ndcg + ndcg_score(np.array(y_pre), list(tags))
                 recommend_count += tagsNum
         precision = precision / count
@@ -197,6 +202,7 @@ def train(data, test, m, gamma):
         print("Recall: " + str(recall))
         print("F1: " + str(f_score))
         print("MRR: " + str(mrr))
+        print("NDCG: " + str(ndcg))
         # 将模型最好时的效果保存下来
         if f_score > best_result:
             best_result = f_score
@@ -212,11 +218,6 @@ def train(data, test, m, gamma):
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
     # best_file.close()
 
-
-
-
-def ndcg_score(y_pre, y_true):
-    return
 
 m_params = [8]
 gamma_params = [0.5]
