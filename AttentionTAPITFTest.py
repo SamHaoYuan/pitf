@@ -61,6 +61,22 @@ def handle_pre_vecs(file_path):
     return torch.FloatTensor(pre_vecs)
 
 
+def mrr_rank_score(y_pre, y_true):
+    """
+    实现MRR@5，给定user与item,y_pre为降序排列的推荐tag列表，y_true为实际label,注意，这里一次user与item的rank
+    :param y_pre:
+    :param y_true:
+    :return:
+    """
+    score = 0
+    # num = len(y_true)  # 实际标签数量
+    for true_tag in y_true:
+        if true_tag in y_pre:
+            index_ = y_pre.index(int(true_tag)) + 1
+            score += 1/index_
+    return score
+
+
 user_vecs = handle_pre_vecs(user_vecs_path)
 item_vecs = handle_pre_vecs(item_vecs_path)
 tag_user_vecs = handle_pre_vecs(tag_user_vec_path)
@@ -75,7 +91,7 @@ def train(data, test, m, gamma):
 
     :return:
     """
-    learnRate = 0.001
+    learnRate = 0.01
     lam = 0.00005
     dim = 64
     iter_ = 100
@@ -102,7 +118,7 @@ def train(data, test, m, gamma):
     for epoch in range(iter_):
         # file_ = open('AttentionTureParam.txt', 'a')
         all_data = []
-        all_data = dataload.get_sequential(num_tag, m, 100, True)
+        all_data = dataload.get_sequential(num_tag, m, 10, True)
         all_data = all_data[:, :8 + m]
         losses = []
         print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
@@ -124,6 +140,8 @@ def train(data, test, m, gamma):
         precision = 0
         recall = 0
         count = 0
+        mrr = 0
+        recommend_count = 0
         validaTagSet = dataload.validaTagSet
 
         for u in validaTagSet.keys():
@@ -141,8 +159,11 @@ def train(data, test, m, gamma):
                 precision = precision + float(number / 5)
                 recall = recall + float(number / tagsNum)
                 count += 1
+                mrr = mrr + mrr_rank_score(list(y_pre), list(tags))
+                recommend_count += tagsNum
         precision = precision / count
         recall = recall / count
+        mrr = mrr / recommend_count
         if precision == 0 and recall == 0:
             f_score = 0
         else:
@@ -150,6 +171,7 @@ def train(data, test, m, gamma):
         print("Precisions: " + str(precision))
         print("Recall: " + str(recall))
         print("F1: " + str(f_score))
+        print("MRR: " + str(mrr))
         # 将模型最好时的效果保存下来
         if f_score > best_result:
             best_result = f_score
@@ -165,6 +187,11 @@ def train(data, test, m, gamma):
     # best_file.write('gamma: %f,  the length: %d, best_result: %f ' %(gamma, m, best_result)+'\r\n')
     # best_file.close()
 
+
+
+
+def ndcg_score(y_pre, y_true):
+    return
 
 m_params = [8]
 gamma_params = [0.5]
