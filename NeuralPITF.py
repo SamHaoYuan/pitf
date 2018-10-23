@@ -1181,12 +1181,12 @@ class AttentionTAPITF(nn.Module):
         self.query_type = query_type  # 该参数控制 user 还是tag query（默认为tag)
 
     def _init_weight(self, init_st, init_embedding):
-        self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
-        self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
-        # self.userVecs.weight.data = init_embedding[0]
-        # self.itemVecs.weight.data = init_embedding[1]
-        # self.tagUserVecs.weight.data[1:] = init_embedding[2]
-        # self.tagItemVecs.weight.data[1:] = init_embedding[3]
+        # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
+        # self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
+        self.userVecs.weight.data = init_embedding[0]
+        self.itemVecs.weight.data = init_embedding[1]
+        self.tagUserVecs.weight.data[1:] = init_embedding[2]
+        self.tagItemVecs.weight.data[1:] = init_embedding[3]
 
     def forward(self, x):
         """

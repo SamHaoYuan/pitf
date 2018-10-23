@@ -41,10 +41,10 @@ movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test = movielens_test_all.astype('int64')
 # movielens_test = movielens_test_all
 
-user_vecs_path = 'PreVecs/movielens/UserVecs.txt'
-item_vecs_path = 'PreVecs/movielens/ItemVecs.txt'
-tag_user_vec_path = 'PreVecs/movielens/UserTagVecs.txt'
-tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs.txt'
+user_vecs_path = 'PreVecs/movielens/TAPITF/UserVecs.txt'
+item_vecs_path = 'PreVecs/movielens/TAPITF/ItemVecs.txt'
+tag_user_vec_path = 'PreVecs/movielens/TAPITF/UserTagVecs.txt'
+tag_item_vec_path = 'PreVecs/movielens/TAPITF/ItemTagVecs.txt'
 
 
 def handle_pre_vecs(file_path):
@@ -76,6 +76,29 @@ def mrr_rank_score(y_pre, y_true):
             score += 1/index_
     return score
 
+
+def dcg_score(y_pre, y_true, k):
+    """
+    推荐系统中，输入好的y_pre是已经排序好的结果，y_true是命中目标，可能有多个
+    :param y_pre:
+    :param y_true:
+    :param k : 返回结果长度
+    :return:
+    """
+    y_pre_score = np.zeros(k)
+    for i in range(len(y_pre)):
+        pre_tag = y_pre[i]
+        if pre_tag in y_true:
+            y_pre_score[i] = 1
+    gain = 2 ** y_pre_score - 1
+    discounts = np.log2(np.arange(k) + 2)
+    return np.sum(gain/discounts)
+
+
+def ndcg_score(y_pre, y_true, k=5):
+    dcg = dcg_score(y_pre, y_true, k)
+    idcg = dcg_score(y_true, y_true, k)
+    return dcg/idcg
 
 user_vecs = handle_pre_vecs(user_vecs_path)
 item_vecs = handle_pre_vecs(item_vecs_path)
@@ -142,6 +165,7 @@ def train(data, test, m, gamma):
         count = 0
         mrr = 0
         recommend_count = 0
+        ndcg = 0
         validaTagSet = dataload.validaTagSet
 
         for u in validaTagSet.keys():
@@ -160,6 +184,7 @@ def train(data, test, m, gamma):
                 recall = recall + float(number / tagsNum)
                 count += 1
                 mrr = mrr + mrr_rank_score(list(y_pre), list(tags))
+                ndcg = ndcg + ndcg_score(np.array(y_pre), list(tags))
                 recommend_count += tagsNum
         precision = precision / count
         recall = recall / count
