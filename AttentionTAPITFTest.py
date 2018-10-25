@@ -86,8 +86,8 @@ def dcg_score(y_pre, y_true, k):
     :return:
     """
     y_pre_score = np.zeros(k)
-    if len(y_pre) > 5:
-        y_pre = y_pre[:5]
+    if len(y_pre) > k:
+        y_pre = y_pre[:k]
     for i in range(len(y_pre)):
         pre_tag = y_pre[i]
         if pre_tag in y_true:
@@ -127,11 +127,12 @@ def train(data, test, m, gamma):
     gamma = gamma
     batch_size = 100
     n = 1000
+    k = 5
     # 计算numUser, numItem, numTag
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
     predict_user_weight, item_weight = dataload.weight_to_vector(num_user, num_item, num_tag)
-    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight).cuda()
+    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight, True, 'tag').cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
@@ -142,10 +143,11 @@ def train(data, test, m, gamma):
     best_result = 0
     # best_result_state = model.state_dict()
     # best_file = open('Attention_best_params.txt', 'a')
+    all_data = dataload.get_sequential(num_tag, m, 100, True)
     for epoch in range(iter_):
         # file_ = open('AttentionTureParam.txt', 'a')
-        all_data = []
-        all_data = dataload.get_sequential(num_tag, m, 10, True)
+        # all_data = []
+        # all_data = dataload.get_sequential(num_tag, m, 10, True)
         all_data = all_data[:, :8 + m]
         losses = []
         print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
@@ -179,21 +181,22 @@ def train(data, test, m, gamma):
                 tagsNum = len(tags)
                 x_t = torch.LongTensor([u, i] + list(dataload.userShortMemory[u][:m])).cuda()
                 x_t = x_t.unsqueeze(0)
-                y_pre = model.predict_top_k(x_t)
+                y_pre = model.predict_top_k(x_t, k)
                 # print(y_pre)
                 for tag in y_pre:
                     if int(tag) in tags:
                         number += 1
-                precision = precision + float(number / 5)
+                precision = precision + float(number / k)
                 recall = recall + float(number / tagsNum)
                 count += 1
                 mrr = mrr + mrr_rank_score(list(y_pre), list(tags))
                 # print(ndcg_score(np.array(y_pre), list(tags)))
-                ndcg = ndcg + ndcg_score(np.array(y_pre), list(tags))
+                ndcg = ndcg + ndcg_score(np.array(y_pre), list(tags), k)
                 recommend_count += tagsNum
         precision = precision / count
         recall = recall / count
         mrr = mrr / recommend_count
+        ndcg = ndcg / count
         if precision == 0 and recall == 0:
             f_score = 0
         else:

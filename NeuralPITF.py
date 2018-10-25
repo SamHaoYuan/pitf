@@ -101,8 +101,8 @@ class DataSet:
         self.userTimeList, self.validaUserTimeList = dict(), dict()  # 按顺序存储每个用户的 timestamp
         self.userTagTimeList = list()  # 用处用户使用tag的时间戳列表
         self.userShortMemory = dict()  # 记录预测用户历史序列
-        self.alphaUser = 1.2
-        self.alphaItem = 1.2
+        self.alphaUser = 1.4
+        self.alphaItem = 1.4
         self.data = data
         self.validation = validation
         self.is_timestamp = is_timestamp
@@ -1160,14 +1160,20 @@ class AttentionTAPITF(nn.Module):
     1. 直接使用TAPITF
     2. 实现user query 的attention (权重和映射都可以试一试，映射更加有说服力）
     3. 实现tag query 的 attention
+
+    最后，我们修改最后一层逻辑，参考神经协同过滤的思想，使用多种思路组合user_vec,user_tag_vec,item_vec,item_tag_vec
+    1. 直接四维向量进行拼接，得到最后的结果（这种方法最后时限，因为相对不具备很好的解释性）
+    2. user与tag 进行一层全连接， item与tag进行一层全连接
+    3. 将传统点击和MLP学习到的特征，再进行一次拼接
+    在每层的搭建上，使用塔的结果，每一层减少一半的规模
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights, use_attention=True, query_type='tag'):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights, use_attention=True, query_type='tag', cf_type='t-MLP'):
         super(AttentionTAPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
         self.tagUserVecs = nn.Embedding(numTag, k, padding_idx=0)
         self.tagItemVecs = nn.Embedding(numTag, k, padding_idx=0)
-        # self.attentionMLP = nn.Linear(k, k)
+        self.attentionMLP = nn.Linear(k, k)
         self.user_tag_map = nn.Linear(4*k, k)
         self.relu = nn.ReLU()
         self.m = m
@@ -1179,6 +1185,15 @@ class AttentionTAPITF(nn.Module):
         self.tag_map = nn.Linear(4*k, k)
         self.use_attention = use_attention  # 该参数控制是否使用 attention 机制
         self.query_type = query_type  # 该参数控制 user 还是tag query（默认为tag)
+        self.cf_type = cf_type
+        if self.cf_type == 't-MLP':
+            # 先尝试只用三层
+            self.user_tag_mlp = nn.Linear(2*k, k)
+            self.item_tag_mlp = nn.Linear(2*k, k)
+            self.user_item_tag_mlp = nn.Linear(2*k, 1)
+        elif self.cf_type == 'TAMLP':
+            self.user_tag_mlp = nn.Linear(2*k, 1)
+            self.item_tag_mlp = nn.Linear(2*k, 1)
 
     def _init_weight(self, init_st, init_embedding):
         # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
@@ -1232,35 +1247,51 @@ class AttentionTAPITF(nn.Module):
                 #         t.sum(mix_neg_user_vecs * neg_tag_user_vec, dim=1) + t.sum(item_vecs * neg_tag_item_vec, dim=1))
                 add_vec = user_tag_vecs - h
                 mul_vec = user_tag_vecs * h
-                user_tag_vecs_ = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
+                user_tag_vecs = self.relu(self.tag_map(t.cat((user_tag_vecs, h, add_vec, mul_vec), 1)))
                 add_vec = neg_tag_user_vec - h_neg
                 mul_vec = neg_tag_user_vec * h_neg
-                neg_tag_user_vecs_ = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
-                w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs_, dim=1)
-                w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
-                w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vecs_, dim=1)
-                w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
-                r = w_u + w_i - (w_neg_u + w_neg_i)
+                neg_tag_user_vec = self.relu(self.tag_map(t.cat((neg_tag_user_vec, h_neg, add_vec, mul_vec), 1)))
+                # w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs, dim=1)
+                # w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+                # w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vec, dim=1)
+                # w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+                # r = w_u + w_i - (w_neg_u + w_neg_i)
             else:
                 h = self.attention(user_vecs, tag_history_vecs)
                 add_vec = user_vecs - h
                 mul_vec = user_vecs * h
-                user_vecs_ = self.relu(self.tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1)))
-                w_u = user_weight.float() * t.sum(user_vecs_ * user_tag_vecs, dim=1)
-                w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
-                w_neg_u = neg_user_weight.float() * t.sum(user_vecs_ * neg_tag_user_vec, dim=1)
-                w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
-                r = w_u + w_i - (w_neg_u + w_neg_i)
+                user_vecs = self.relu(self.tag_map(t.cat((user_vecs, h, add_vec, mul_vec), 1)))
+                # w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs, dim=1)
+                # w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
+                # w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vec, dim=1)
+                # w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
+                # r = w_u + w_i - (w_neg_u + w_neg_i)
 
-        # r = user_weight * t.sum(user_vecs * user_tag_vecs_, dim=1) + item_weight * t.sum(
-        #     item_vecs * item_tag_vecs, dim=1) - (neg_user_weight * t.sum(user_vecs * neg_tag_user_vecs_, dim=1) +
-        #                                         neg_item_weight * t.sum(item_vecs * neg_tag_item_vec, dim=1))
-        else:
-            w_u = user_weight.float() * t.sum(user_vecs*user_tag_vecs, dim=1)
+        if self.cf_type == 'GMF':
+            w_u = user_weight.float() * t.sum(user_vecs * user_tag_vecs, dim=1)
             w_i = item_weight.float() * t.sum(item_vecs * item_tag_vecs, dim=1)
             w_neg_u = neg_user_weight.float() * t.sum(user_vecs * neg_tag_user_vec, dim=1)
             w_neg_i = neg_item_weight.float() * t.sum(item_vecs * neg_tag_item_vec, dim=1)
-            r = w_u+w_i - (w_neg_u + w_neg_i)
+            r = w_u + w_i - (w_neg_u + w_neg_i)
+        elif self.cf_type == 'MLP':
+            r = 0
+        elif self.cf_type == 't-MLP':
+            # 先不加时间权重试试（应该效果难说）
+            w_u = self.relu(self.user_tag_mlp(t.cat((user_vecs, user_tag_vecs), 1)))
+            w_i = self.relu(self.item_tag_mlp(t.cat((item_vecs, item_tag_vecs), 1)))
+            w_neg_u = self.relu(self.user_tag_mlp(t.cat((user_vecs, neg_tag_user_vec), 1)))
+            w_neg_i = self.relu(self.item_tag_mlp(t.cat((item_vecs, neg_tag_item_vec), 1)))
+            r = t.sigmoid(self.user_item_tag_mlp(t.cat((w_u, w_i), 1))) - t.sigmoid(self.user_item_tag_mlp(t.cat((w_neg_u, w_neg_i), 1)))
+            # r =self.relu(self.user_item_tag_mlp(t.cat((w_u, w_i), 1))) -self.relu(self.user_item_tag_mlp(t.cat((w_neg_u, w_neg_i), 1)))
+        elif self.cf_type == 'TAMLP':
+            # user_tag 和 item_tag de 的向量进过MLP拼接后，加入权重再进行组合
+            w_u = self.relu(self.user_tag_mlp(t.cat((user_vecs, user_tag_vecs), 1)))
+            w_i = self.relu(self.item_tag_mlp(t.cat((item_vecs, item_tag_vecs), 1)))
+            w_neg_u = self.relu(self.user_tag_mlp(t.cat((user_vecs, neg_tag_user_vec), 1)))
+            w_neg_i = self.relu(self.item_tag_mlp(t.cat((item_vecs, neg_tag_item_vec), 1)))
+            r = user_weight.float()* w_u + item_weight.float() * w_i - (neg_user_weight.float() * w_neg_u + neg_item_weight.float() * w_neg_i)
+        else:
+            r = 0
         return r
 
     def attention(self, u_vec, h_vecs):
@@ -1275,7 +1306,8 @@ class AttentionTAPITF(nn.Module):
         # batch_size = u_vec.size()[0]
         u_vec_ = u_vec.unsqueeze(2)
         tag_h_vecs = h_vecs
-        # tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
+        # if self.query_type == 'user':
+        tag_h_vecs = self.relu(self.attentionMLP(h_vecs))
         alpha = nn.functional.softmax(t.bmm(tag_h_vecs, u_vec_).squeeze(2), 1)
         alpha = alpha.unsqueeze(1)
         h = t.bmm(alpha, h_vecs)
@@ -1334,4 +1366,14 @@ class AttentionTAPITF(nn.Module):
         y = user_weight * user_tag.squeeze() + item_weight * item_tag.squeeze()
         # y = t.squeeze(y)
         # print(y.topk(k))
+        if self.cf_type == 't-MLP':
+            user_tag = self.relu(self.user_tag_mlp(t.cat((user_vec, user_tag_vecs), 1)))
+            item_tag = self.relu(self.item_tag_mlp(t.cat((item_vec, self.tagItemVecs.weight), 1)))
+            y = t.sigmoid(self.user_item_tag_mlp(t.cat((user_tag, item_tag), 1)))
+            # y = self.relu(self.user_item_tag_mlp(t.cat((user_tag, item_tag), 1)))
+            y = t.squeeze(y)
+        elif self.cf_type == 'TAMLP':
+            user_tag = self.relu(self.user_tag_mlp(t.cat((user_vec, user_tag_vecs), 1)))
+            item_tag = self.relu(self.item_tag_mlp(t.cat((item_vec, self.tagItemVecs.weight), 1)))
+            y = user_weight * user_tag.squeeze() + item_weight * item_tag.squeeze()
         return y.topk(k)[1]  # 按降序进行排列
