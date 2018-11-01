@@ -41,10 +41,15 @@ movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test = movielens_test_all.astype('int64')
 # movielens_test = movielens_test_all
 
-user_vecs_path = 'PreVecs/movielens/TAPITF/UserVecs.txt'
-item_vecs_path = 'PreVecs/movielens/TAPITF/ItemVecs.txt'
-tag_user_vec_path = 'PreVecs/movielens/TAPITF/UserTagVecs.txt'
-tag_item_vec_path = 'PreVecs/movielens/TAPITF/ItemTagVecs.txt'
+user_vecs_path = 'PreVecs/movielens/UserVecs.txt'
+item_vecs_path = 'PreVecs/movielens/ItemVecs.txt'
+tag_user_vec_path = 'PreVecs/movielens/UserTagVecs.txt'
+tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs.txt'
+
+# user_vecs_path = 'PreVecs/movielens/TAPITF/UserVecs.txt'
+# item_vecs_path = 'PreVecs/movielens/TAPITF/ItemVecs.txt'
+# tag_user_vec_path = 'PreVecs/movielens/TAPITF/UserTagVecs.txt'
+# tag_item_vec_path = 'PreVecs/movielens/TAPITF/ItemTagVecs.txt'
 
 
 def handle_pre_vecs(file_path):
@@ -110,7 +115,6 @@ tag_user_vecs = handle_pre_vecs(tag_user_vec_path)
 tag_item_vecs = handle_pre_vecs(tag_item_vec_path)
 ini_embeddings = [user_vecs, item_vecs, tag_user_vecs, tag_item_vecs]
 
-
 def train(data, test, m, gamma):
     """
     该函数主要作用： 定义网络；定义数据，定义损失函数和优化器，计算重要指标，开始训练（训练网络，计算在测试集上的指标）
@@ -118,7 +122,7 @@ def train(data, test, m, gamma):
 
     :return:
     """
-    learnRate = 0.01
+    learnRate = 0.00001
     lam = 0.00005
     dim = 64
     iter_ = 100
@@ -132,22 +136,22 @@ def train(data, test, m, gamma):
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
     predict_user_weight, item_weight = dataload.weight_to_vector(num_user, num_item, num_tag)
-    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight, True, 'tag').cuda()
+    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight, True, 'tag', 'TAMLP').cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
-    opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
-    # opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
+    # opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
     opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
     # best_result_state = model.state_dict()
     # best_file = open('Attention_best_params.txt', 'a')
-    all_data = dataload.get_sequential(num_tag, m, 100, True)
+    # all_data = dataload.get_sequential(num_tag, m, 10, True)
     for epoch in range(iter_):
         # file_ = open('AttentionTureParam.txt', 'a')
-        # all_data = []
-        # all_data = dataload.get_sequential(num_tag, m, 10, True)
+        all_data = []
+        all_data = dataload.get_sequential(num_tag, m, 10, True)
         all_data = all_data[:, :8 + m]
         losses = []
         print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
@@ -158,6 +162,7 @@ def train(data, test, m, gamma):
             opti.zero_grad()
             # print(model.embedding.userVecs.weight)
             loss = loss_function(r)
+            # print(loss)
             # print(loss)
             loss.backward()
             opti.step()
