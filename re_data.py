@@ -7,7 +7,7 @@ Created on Wed Oct 31 16:23:25 2018
 
 import pandas as pd
 
-data_path = 'data/movielens/all_id_core1'
+data_path = 'data/delicious/all_id_core1'
 
 data = pd.read_csv(data_path, delimiter='\t', names=['u','i','tag','time'])
 
@@ -56,3 +56,22 @@ data.tag= tags
 # data.to_csv('data/movielens/user_id_core3', sep='\t', header=False, index=False)
 
 # 训练集与测试集划分（留一法）
+train = data
+# test = pd.DataFrame() # 最终的测试集
+index = []
+# 比较麻烦：1.找到最后这一组的item_id 2.从最后一个开始检查，存储所有的index 3.直接根据index划分测试与训练集（赋值与删除）
+for u_id, group in train.groupby(['u']):
+    values = group.i.values
+    item_id = values[-1]
+    for number in range(len(group.i.values), 0, -1):
+        if values[number-1] == item_id:
+            index.append(group.index[number-1])
+        else:
+            break
+
+test = data.loc[index]
+train = data.drop(index)       
+
+train.to_csv('data/delicious/user_id_core3_train', sep='\t', header=False, index=False)
+test.to_csv('data/delicious/user_id_core3_test', sep='\t', header=False, index=False)
+    

@@ -234,7 +234,7 @@ class DataSet:
                 user_time_list[u] = time if time > user_time_list[u] else user_time_list[u]
         self.cal_pre_user_tag_weights(num_user, user_time_list)  # 计算预测时的权重，同时计算训练集过程中的权重
         self.cal_train_user_tag_weights(num_user)  # 计算训练集中的user-tag权重，会用trainUserTagTimeList
-        self.cal_item_tag_weights(num_tag, item_tag_count_list)
+        self.cal_item_tag_weights(num_item, item_tag_count_list)
 
     def cal_pre_user_tag_weights(self, num_user, user_time_list):
         """
@@ -335,8 +335,8 @@ class DataSet:
                         value = 1 + np.log10(1 + np.power(10, self.alphaUser) * (self.trainUserTagTimeTaoList[u][tag][temp_time]+self.initialTao)/normalize)
                     self.userTagTrainWeight[u][tag][temp_time] = value
 
-    def cal_item_tag_weights(self, num_tag, item_tag_count_list):
-        for item in range(num_tag):
+    def cal_item_tag_weights(self, num_item, item_tag_count_list):
+        for item in range(num_item):
             normalize = 0
             temp_tags_count = item_tag_count_list[item]
             for tag in temp_tags_count.keys():
@@ -1168,7 +1168,7 @@ class AttentionTAPITF(nn.Module):
     3. 将传统点击和MLP学习到的特征，再进行一次拼接
     在每层的搭建上，使用塔的结果，每一层减少一半的规模
     """
-    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, init_embeddings, user_weights, item_weights, use_attention=True, query_type='tag', cf_type='t-MLP'):
+    def __init__(self, numUser, numItem, numTag, k, init_st, m, gamma, user_weights, item_weights, init_embeddings=False, use_attention=True, query_type='tag', cf_type='t-MLP'):
         super(AttentionTAPITF, self).__init__()
         self.userVecs = nn.Embedding(numUser, k)
         self.itemVecs = nn.Embedding(numItem, k)
@@ -1216,10 +1216,11 @@ class AttentionTAPITF(nn.Module):
     def _init_weight(self, init_st, init_embedding):
         # self.userVecs.weight = nn.init.normal(self.userVecs.weight, 0, init_st)
         # self.itemVecs.weight = nn.init.normal(self.itemVecs.weight, 0, init_st)
-        self.userVecs.weight.data = init_embedding[0]
-        self.itemVecs.weight.data = init_embedding[1]
-        self.tagUserVecs.weight.data[1:] = init_embedding[2]
-        self.tagItemVecs.weight.data[1:] = init_embedding[3]
+        if init_embedding:
+            self.userVecs.weight.data = init_embedding[0]
+            self.itemVecs.weight.data = init_embedding[1]
+            self.tagUserVecs.weight.data[1:] = init_embedding[2]
+            self.tagItemVecs.weight.data[1:] = init_embedding[3]
 
     def forward(self, x):
         """

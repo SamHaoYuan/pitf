@@ -11,8 +11,12 @@ from torch.autograd import Variable
 import torch.optim as optim
 import datetime
 
-train_data_path = 'data/movielens/all_id_core3_train'
-test_data_path = 'data/movielens/all_id_core3_test'
+# train_data_path = 'data/movielens/all_id_core3_train'
+# test_data_path = 'data/movielens/all_id_core3_test'
+# train_data_path = 'data/movielens/user_id_core3_train'
+# test_data_path = 'data/movielens/user_id_core3_test'
+train_data_path = 'data/movielens/user_id_core3_train'
+test_data_path = 'data/movielens/user_id_core3_test'
 # ini_time = 1135429431000
 
 # train_data_path = 'data/movielens/all_id_core1_train'
@@ -41,16 +45,20 @@ movielens_test_all = np.genfromtxt(test_data_path, delimiter='\t', dtype=float)
 movielens_test = movielens_test_all.astype('int64')
 # movielens_test = movielens_test_all
 
-user_vecs_path = 'PreVecs/movielens/UserVecs.txt'
-item_vecs_path = 'PreVecs/movielens/ItemVecs.txt'
-tag_user_vec_path = 'PreVecs/movielens/UserTagVecs.txt'
-tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs.txt'
+# user_vecs_path = 'PreVecs/movielens/UserVecs.txt'
+# item_vecs_path = 'PreVecs/movielens/ItemVecs.txt'
+# tag_user_vec_path = 'PreVecs/movielens/UserTagVecs.txt'
+# tag_item_vec_path = 'PreVecs/movielens/ItemTagVecs.txt'
 
 # user_vecs_path = 'PreVecs/movielens/TAPITF/UserVecs.txt'
 # item_vecs_path = 'PreVecs/movielens/TAPITF/ItemVecs.txt'
 # tag_user_vec_path = 'PreVecs/movielens/TAPITF/UserTagVecs.txt'
 # tag_item_vec_path = 'PreVecs/movielens/TAPITF/ItemTagVecs.txt'
 
+user_vecs_path = 'PreVecs/movielens/userCore3/UserVecs.txt'
+item_vecs_path = 'PreVecs/movielens/userCore3/ItemVecs.txt'
+tag_user_vec_path = 'PreVecs/movielens/userCore3/UserTagVecs.txt'
+tag_item_vec_path = 'PreVecs/movielens/userCore3/ItemTagVecs.txt'
 
 def handle_pre_vecs(file_path):
     pre_vecs = np.genfromtxt(file_path, delimiter='\t', dtype=str)
@@ -109,11 +117,13 @@ def ndcg_score(y_pre, y_true, k=5):
     # print(idcg)
     return dcg/idcg
 
+
 user_vecs = handle_pre_vecs(user_vecs_path)
 item_vecs = handle_pre_vecs(item_vecs_path)
 tag_user_vecs = handle_pre_vecs(tag_user_vec_path)
 tag_item_vecs = handle_pre_vecs(tag_item_vec_path)
 ini_embeddings = [user_vecs, item_vecs, tag_user_vecs, tag_item_vecs]
+
 
 def train(data, test, m, gamma):
     """
@@ -122,10 +132,10 @@ def train(data, test, m, gamma):
 
     :return:
     """
-    learnRate = 0.00001
+    learnRate = 0.0001
     lam = 0.00005
     dim = 64
-    iter_ = 100
+    iter_ = 50
     init_st = 0.01
     m = m
     gamma = gamma
@@ -136,12 +146,14 @@ def train(data, test, m, gamma):
     dataload = DataSet(data, test, True)
     num_user, num_item, num_tag = dataload.calc_number_of_dimensions()
     predict_user_weight, item_weight = dataload.weight_to_vector(num_user, num_item, num_tag)
-    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, ini_embeddings, predict_user_weight, item_weight, True, 'tag', 'TAMLP').cuda()
+    # model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma,  predict_user_weight, item_weight,ini_embeddings, True, 'tag', 'TAMLP').cuda()
+    model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma,  predict_user_weight, item_weight, ini_embeddings, True, 'tag', 'GMF').cuda()
+    # model = AttentionTAPITF(int(num_user), int(num_item), int(num_tag), dim, init_st, m, gamma, predict_user_weight, item_weight, False, True, 'tag', 'TAMLP').cuda()
     # torch.save(model.state_dict(), 'attention_initial_params')
     # 对每个正样本进行负采样
     loss_function = SinglePITF_Loss().cuda()
-    # opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
-    opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
+    opti = optim.SGD(model.parameters(), lr=learnRate, weight_decay=lam)
+    # opti = optim.Adam(model.parameters(), lr=learnRate, weight_decay=lam)
     opti.zero_grad()
     # 每个epoch中的sample包含一个正样本和j个负样本
     best_result = 0
@@ -184,7 +196,10 @@ def train(data, test, m, gamma):
                 number = 0
                 tags = validaTagSet[u][i]
                 tagsNum = len(tags)
-                x_t = torch.LongTensor([u, i] + list(dataload.userShortMemory[u][:m])).cuda()
+                if u in dataload.userShortMemory.keys():
+                    x_t = torch.LongTensor([u, i] + list(dataload.userShortMemory[u][:m])).cuda()
+                else:
+                    x_t = torch.LongTensor([u, i] + list(np.zeros(m))).cuda()
                 x_t = x_t.unsqueeze(0)
                 y_pre = model.predict_top_k(x_t, k)
                 # print(y_pre)
